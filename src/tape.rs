@@ -1,4 +1,4 @@
-use crate::{char_ext::CharExt, etc::count_indent};
+use crate::{char_ext::CharExt, etc::count_indent, slice_ext::SliceExt};
 
 /// Text input and an index associated with an element in it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -11,6 +11,13 @@ pub struct Tape<'a> {
 }
 
 impl<'a> Tape<'a> {
+    /// Returns the string slice about the given indices as an unchecked UTF-8 string.
+    #[must_use]
+    #[inline(always)]
+    pub fn slice_utf8(&self, from: usize, to: usize) -> String {
+        (&self.raw[from..to]).to_utf8()
+    }
+
     /// Advances the current position by 1 character.
     #[inline(always)]
     pub fn adv(&mut self) {
@@ -105,6 +112,7 @@ impl<'a> Tape<'a> {
 
     /// Returns the position of the first character returning true,
     /// respecting paragraph spacing rules, or `None`.
+    #[must_use]
     #[inline]
     pub fn poll_in_pgraph<F>(&self, spacing: u8, mut pred: F) -> Option<usize>
     where
@@ -132,9 +140,68 @@ impl<'a> Tape<'a> {
     /// current position.
     ///
     /// Leaves `pos` pointing at the matching character (or at `text.len()` when none matched).
-    /// Returns `true` if a matching character was found, `false` otherwise.
+    /// Returns the subslice iterated over.
     #[inline]
-    pub fn skip_to<F>(&mut self, pred: F) -> bool
+    pub fn consume<F>(&mut self, mut pred: F) -> &'a [u8]
+    where
+        F: FnMut(u8, usize) -> bool,
+    {
+        match self.poll(|ch, pos| !pred(ch, pos)) {
+            None => &self.raw[0..0],
+            Some(pos) => {
+                let res = &self.raw[self.pos..pos];
+                self.pos = pos;
+                res
+            }
+        }
+    }
+
+    /// Decrement `pos` until `pred` returns true for the character at the
+    /// current position.
+    ///
+    /// Leaves `pos` pointing at the matching character (or at `text.len()` when none matched).
+    /// Returns the subslice iterated over.
+    #[inline]
+    pub fn put_back<F>(&mut self, mut pred: F) -> &'a [u8]
+    where
+        F: FnMut(u8, usize) -> bool,
+    {
+        match self.poll_rev(|ch, pos| !pred(ch, pos)) {
+            None => &self.raw[0..0],
+            Some(pos) => {
+                let res = &self.raw[self.pos..pos];
+                self.pos = pos;
+                res
+            }
+        }
+    }
+
+    /// Advances `pos` until `pred` returns true for the character at the
+    /// current position, respecting paragraph spacing rules.
+    ///
+    /// Leaves `pos` pointing at the matching character (or at `text.len()` when none matched).
+    /// Returns the subslice iterated over.
+    #[inline]
+    pub fn consume_in_pgraph<F>(&mut self, spacing: u8, mut pred: F) -> &'a [u8]
+    where
+        F: FnMut(u8, usize) -> bool,
+    {
+        match self.poll_in_pgraph(spacing, |ch, pos| !pred(ch, pos)) {
+            None => &self.raw[0..0],
+            Some(pos) => {
+                let res = &self.raw[self.pos..pos];
+                self.pos = pos;
+                res
+            }
+        }
+    }
+
+    /// Advances `pos` until `query` is found.
+    ///
+    /// Returns `true` if found and `pos` is left pointing at the match,
+    /// or `false` and `pos` is restored to its original value.
+    #[inline]
+    pub fn seek<F>(&mut self, pred: F) -> bool
     where
         F: FnMut(u8, usize) -> bool,
     {
@@ -147,32 +214,12 @@ impl<'a> Tape<'a> {
         }
     }
 
-    /// Decrement `pos` until `pred` returns true for the character at the
-    /// current position.
+    /// Advances `pos` until `query` is found within the current paragraph.
     ///
-    /// Leaves `pos` pointing at the matching character (or at `text.len()` when none matched).
-    /// Returns `true` if a matching character was found, `false` otherwise.
+    /// Returns `true` if found (leaving `pos` at the match), or `false`
+    /// and restores `pos` on failure.
     #[inline]
-    pub fn skip_to_rev<F>(&mut self, pred: F) -> bool
-    where
-        F: FnMut(u8, usize) -> bool,
-    {
-        match self.poll_rev(pred) {
-            None => false,
-            Some(pos) => {
-                self.pos = pos;
-                true
-            }
-        }
-    }
-
-    /// Advances `pos` until `pred` returns true for the character at the
-    /// current position, respecting paragraph spacing rules.
-    ///
-    /// Leaves `pos` pointing at the matching character (or at `text.len()` when none matched).
-    /// Returns `true` if a matching character was found, `false` otherwise.
-    #[inline]
-    pub fn skip_to_in_pgraph<F>(&mut self, spacing: u8, pred: F) -> bool
+    pub fn seek_in_pgraph<F>(&mut self, spacing: u8, pred: F) -> bool
     where
         F: FnMut(u8, usize) -> bool,
     {
@@ -183,41 +230,6 @@ impl<'a> Tape<'a> {
                 true
             }
         }
-    }
-
-    /// Advance `pos` until `query` is found within the current paragraph.
-    ///
-    /// Returns `true` if found (leaving `pos` at the match), or `false`
-    /// and restores `pos` on failure.
-    #[inline]
-    pub fn try_skip_to_in_pgraph<F>(&mut self, spacing: u8, pred: F) -> bool
-    where
-        F: FnMut(u8, usize) -> bool,
-    {
-        let start = self.pos;
-        let found = self.skip_to_in_pgraph(spacing, pred);
-        if !found {
-            self.pos = start;
-        }
-        found
-    }
-
-    /// Advance `pos` until `query` is found.
-    ///
-    /// Advance `pos` until `query` is found. Returns `true` if found and
-    /// `pos` is left pointing at the match, or `false` and `pos` is
-    /// restored to its original value.
-    #[inline]
-    pub fn try_skip_to<F>(&mut self, pred: F) -> bool
-    where
-        F: FnMut(u8, usize) -> bool,
-    {
-        let start = self.pos;
-        let found = self.skip_to(pred);
-        if !found {
-            self.pos = start;
-        }
-        found
     }
 
     /// Returns true if the substring starting at the current position
@@ -246,8 +258,9 @@ impl<'a> Tape<'a> {
         true
     }
 
-    /// Returns the number of times the current line is indented. 
+    /// Returns the number of times the current line is indented.
+    #[must_use]
     pub fn line_indent(&self) -> u8 {
-        count_indent(&self.raw[self.poll_rev(|ch,_| ch == b'\n').unwrap_or(0)..self.pos])
+        count_indent(&self.raw[self.poll_rev(|ch, _| ch == b'\n').unwrap_or(0)..self.pos])
     }
 }

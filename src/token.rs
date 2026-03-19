@@ -34,6 +34,7 @@ pub enum TokenType {
     InlineCode { body: String },    // includes ` `
     InlineRawCode { body: String }, // includes `` ``
     InlineMath { body: String },    // includes $ $
+    CodeBlock { body: String, lang: String },
     Bold,
     Italic,
     Strikethrough,
@@ -42,12 +43,27 @@ pub enum TokenType {
     Checkbox { depth: u8, filled: bool },
     ListItem { depth: u8 },
     NumberedItem { depth: u8, ty: NumberingType, pos: u8 },
-
-    Brac // not actually emitted
 }
 
 impl TokenType {
     pub const HEADING_MAX: usize = 6;
+    pub const FLANK: [TokenType; 5] = [
+            TokenType::Bold,
+    TokenType::Italic,
+    TokenType::Strikethrough,
+    TokenType::Underline,
+    TokenType::Highlight,
+    ];
+}
+
+pub struct FlankType;
+
+impl FlankType {
+    pub const BOLD: u8 = 0b1;
+    pub const ITALIC: u8 = 0b10;
+    pub const STRIKETHROUGH: u8 = 0b100;
+    pub const UNDERLINE: u8 = 0b1000;
+    pub const HIGHLIGHT: u8 = 0b1_0000;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

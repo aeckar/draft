@@ -1,8 +1,9 @@
 //! Don't check for UTF-8 correctness; leave that to the user.
 
 use crate::char_ext::CharExt;
+use crate::slice_ext::SliceExt;
 use crate::tape::Tape;
-use crate::{Token, TokenType};
+use crate::{FlankType, Token, TokenType};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ParserConfig {
@@ -26,7 +27,9 @@ pub struct Parser<'a> {
 
     /// A stack of positions of the first character of openers that
     /// have been resolved but not yet paired with a closer.
-    unclosed_pairs: Vec<(TokenType, usize)>,
+    /// 
+    /// The first element of each pair is the flank type enum.
+    unclosed_pairs: Vec<(u8, usize)>,
 
     ///the tokens are generated in the pre-pass, and
     /// then used in the main pass to generate the output.
@@ -66,29 +69,44 @@ impl<'a> Parser<'a> {
             .push(Token::new(ty, tape.pos, tape.pos + len));
     }
 
-    /// Pops the top of the unclosed pair stack
-    /// and pushes the pair whose opener and closer are at the given positions. 
-    fn close_pair(&mut self, open: usize, close: usize) {
-        self.unclosed_pairs.pop();
-        self.pairs.push((open, close));
-    }
-
     /// Attempts to emit a token if the character cluster
     /// belongs to a flanking token, such as an inline format or link.
     ///
     /// `start` is passed to determine the first character of the cluster.
     /// The current position should be the last character in the cluster.
     /// Returns `None` if a token was not emitted.
-    fn try_emit_flank(&mut self, tape: Tape<'a>, start: usize, len: usize, ty: TokenType) -> Option<Tape<'a>> {
+    /// 
+    /// If `None` is not returned, the length of `self.unclosed_pairs` is always modified
+    /// and the cursor of the returned tape is left at the final character of the cluster.
+    #[must_use]
+    fn try_emit_flank(&mut self, mut tape: Tape<'a>, start: usize, len: usize, ty: u8) -> Option<Tape<'a>> {
         if tape.is_l_clear(start) && !tape.is_r_clear(tape.pos) {   // open
             self.unclosed_pairs.push((ty, start));
+            tape.pos += len - 1;
             return Some(tape);
         } else if tape.is_r_clear(start)
-            && self.unclosed_pairs.last().is_some_and(|(t, _)| *t == ty)
+            && self.unclosed_pairs.last().is_some_and(|(t, _)| *t & ty != 0)
         {   // close
+            let (open_fty, pair_start) = self.unclosed_pairs.pop().unwrap();
             self.pairs
-                .push((self.unclosed_pairs.pop().unwrap().1, start + len));
-            self.emit_cur(tape, ty, 1);
+                .push((pair_start, start + len));
+            if ty == FlankType::BOLD | FlankType::ITALIC {
+                let open_tty = if open_fty == FlankType::BOLD {
+                    TokenType::Bold
+                } else {
+                    TokenType::Italic
+                };
+                self.emit_cur(tape, open_tty, len);
+                if open_fty == FlankType::BOLD {
+                    tape.pos -= 1;  // precede trailing '*'
+                } else {
+                    tape.pos -= 2;  // precede trailing '**'
+                };
+            } else {
+                // IMPORTANT: assumes u8 bitflags
+                self.emit_cur(tape, TokenType::FLANK[open_fty.ilog2() as usize].clone(), len);
+            }
+            tape.pos += len - 1;
             return Some(tape);
         }
         None
@@ -102,6 +120,7 @@ impl<'a> Parser<'a> {
     /// closer, opener terminology
     /// what is a "character cluster"?
     /// what is clearance?
+    /// returning None Relinquishes the need to reset the position to the start. 
     pub fn pass_1(&mut self, mut tape: Tape<'a>) {
         // Because these symbols may show up in prose,
         // we should expect them to most likely be plain text first
@@ -138,6 +157,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Resolves whether a '[' character belongs to
+    #[must_use]
     fn handle_brac(&mut self, mut tape: Tape<'a>) -> Option<Tape<'a>> {
 
         self.unclosed_pairs.push((TokenType::Brac, tape.pos));
@@ -148,6 +168,7 @@ impl<'a> Parser<'a> {
     // numerals must be within (0,4000)
     // numbers must be nonzero, fit in u8
     /// Resolves whether a '.' character belongs to an ordered List Item or plain text.
+    #[must_use]
     fn handle_dot(&mut self, mut tape: Tape<'a>) -> Option<Tape<'a>> {
         let prev = tape.peek_rev();
         if prev.is_none() {
@@ -188,6 +209,7 @@ impl<'a> Parser<'a> {
 
     /// Resolves whether a '-' character belongs to an unordered list item,
     /// a checkbox, or plain text.
+    #[must_use]
     fn handle_dash(&mut self, mut tape: Tape<'a>) -> Option<Tape<'a>> {
         if matches!(tape.peek_rev(), Some(b'o') | Some(b'x')) {    // checkbox
             tape.dec(); // decrement to enable check on line start
@@ -210,20 +232,19 @@ impl<'a> Parser<'a> {
     }
 
     /// Resolves whether a '=' character belongs to a heading or plain text.
+    #[must_use]
     fn handle_equals(&mut self, mut tape: Tape<'a>) -> Option<Tape<'a>> {
         if !tape.at_first_non_ws() {
             return None; 
         }
         let start = tape.pos;
-        self.pgraph_spacing = 1; // ensures we stay on same line
-        tape.adv(); // skip first '='
-        tape.skip_to_in_pgraph(1, |ch, _| ch != b'=');
-        self.pgraph_spacing = 2;
-        let depth = tape.pos - start;
+        let marker = tape.consume_in_pgraph(1, |ch, _| ch == b'=');
+        let depth = marker.len();
         if depth > TokenType::HEADING_MAX {
             return Some(tape); // treat as text, but skip next few '='
         }
         self.emit(TokenType::Heading { depth: depth as u8 }, start, tape.pos);
+        self.pgraph_spacing = 1;
         tape.dec();
         Some(tape) // stop at final '='
     }
@@ -231,16 +252,16 @@ impl<'a> Parser<'a> {
     /// Resolves whether a '$' character belongs to inline math,
     /// a dollar sign literal (if enabled), or plain text.
     /// todo multiline
+    #[must_use]
     fn handle_dollar(&mut self, mut tape: Tape<'a>) -> Option<Tape<'a>> {
         let start = tape.pos;
-        let spacing = self.pgraph_spacing;
         if !self.config.handle_inline_math {    
             return None;
         }
-        if !tape.try_skip_to_in_pgraph(spacing, |ch, _| ch == b'$') { // failed lookahead
+        if !tape.seek_in_pgraph(self.pgraph_spacing, |ch, _| ch == b'$') { // failed lookahead
             return None; // stop at '$'
         }
-        let body = unsafe { String::from_utf8_unchecked(tape.raw[start + 1..tape.pos].to_vec()) };
+        let body = tape.slice_utf8(start + 1, tape.pos);
         self.tokens
             .push(Token::new(TokenType::InlineMath { body }, start, tape.pos + 1));
         Some(tape)  // stop at closing '$'
@@ -248,26 +269,39 @@ impl<'a> Parser<'a> {
 
     /// Resolves whether a ` character belongs to inline code or plain text.
     /// todo multiline
+    #[must_use]
     fn handle_btick(&mut self, mut tape: Tape<'a>) -> Option<Tape<'a>> {
         let start = tape.pos;
         let spacing = self.pgraph_spacing;
         if tape.at(b"```") {
-            return Some(());
+            if !tape.at_first_non_ws() {
+                return None;
+            }
+            tape.pos += 3;  // skip over '```'
+            let lang = tape.consume(|ch,_| ch != b'\n');
+            let body_start = tape.pos + 1;
+            if !tape.seek(|_,pos| tape.raw[pos..].starts_with(b"\n```")) { // failed lookahead
+                return None;
+            }
+            let body = tape.slice_utf8(body_start, tape.pos);
+            tape.pos += 3;  // stop at last '`'
+            self.emit(TokenType::CodeBlock { body, lang: lang.to_utf8_trimmed() }, start, tape.pos + 1);
+            return Some(tape);
         }
         if tape.at(b"``") {
             tape.adv(); // skip over first '`' of open
-            if !tape.try_skip_to_in_pgraph(spacing, |_, pos| tape.raw[pos..].starts_with(b"``")) {
+            if !tape.seek_in_pgraph(spacing, |_, pos| tape.raw[pos..].starts_with(b"``")) {
                 return Some(tape); // stop at 2nd '`'; treat as text
             }
-            let body = unsafe { String::from_utf8_unchecked(tape.raw[start + 2..tape.pos].to_vec()) };
+            let body = tape.slice_utf8(start + 2, tape.pos);
             tape.adv(); // skip over first '`' of closer
             self.emit(TokenType::InlineRawCode { body }, start, tape.pos + 1);
             return Some(tape);
         }
-        if !tape.try_skip_to_in_pgraph(spacing, |ch, _| ch == b'`') {   // failed lookahead
+        if !tape.seek_in_pgraph(spacing, |ch, _| ch == b'`') {   // failed lookahead
             return None; // stop at '`'
         }
-        let body = unsafe { String::from_utf8_unchecked(tape.raw[start + 1..tape.pos].to_vec()) };
+        let body = tape.slice_utf8(start + 1, tape.pos);
         self.tokens
             .push(Token::new(TokenType::InlineCode { body }, start, tape.pos + 1));
         Some(tape)  // stop at closing '`'
@@ -275,74 +309,57 @@ impl<'a> Parser<'a> {
 
     /// Resolves whether a `*` character belongs to a bold token,
     /// an italic token, both, or plain text.
-    fn handle_star(&mut self, mut tape: Tape<'a>) -> Option<Tape<'a>> {
+    #[must_use]
+    fn handle_star(&mut self, tape: Tape<'a>) -> Option<Tape<'a>> {
         let start = tape.pos;
         if tape.at(b"***") {
-            if !self.try_emit_flank(tape, start, 3, TokenType::ItalicBold)
-                && let Some(&(ty, pos)) = self.unclosed_pairs.last()
-                && tape.is_any_clear(start)
-            {
-                if ty == TokenType::Bold {
-                    self.close_pair(pos, tape.pos + 2);
-                    tape.adv();
-                    // stop at 2nd '*'; evaluate single '*' on next iteration
-                } else if ty == TokenType::Italic {
-                    self.close_pair(pos, tape.pos + 1);
-                    // stop at 1st '*'; evaluate '**' on next iteration
-                }
-            }
+            self.try_emit_flank(tape, start, 3, FlankType::BOLD | FlankType::ITALIC)
         } else if tape.at(b"**") {
-            if self.try_emit_flank(tape, start, 2, TokenType::Bold) {
-                self.emit_cur(tape, TokenType::Bold, 2);
-            }
-            None
-        } else if self.try_emit_flank(tape, start, 1, TokenType::Italic) {
-            self.emit_cur(tape, TokenType::Italic, 1);
-        } else {
-            None
+            self.try_emit_flank(tape, start, 2, FlankType::BOLD)
+        } else {    // try for '*'
+            self.try_emit_flank(tape, start, 1, FlankType::ITALIC)
         }
     }
 
     /// Resolves whether a `\` character
     /// belongs to an escape character, a macro, or plain text.
+    #[must_use]
     fn handle_bslash(&mut self, mut tape: Tape<'a>) -> Option<Tape<'a>> {
         if tape.pos == tape.raw.len() - 1 { 
             return None;
         }
         let start = tape.pos; // keep for macro handle token
         tape.adv(); // skip past '\'
-        let after_bslash = tape.pos;
-        tape.skip_to(|ch, _| !ch.is_ascii_alphabetic());
-        let first_non_alpha = tape.pos;
-        if first_non_alpha == after_bslash {    // treat as escape
+        let name = tape.consume(|ch, _| ch.is_ascii_alphabetic());
+        if name.len() == 0 {    // treat as escape
             return Some(tape); // stop at the character after '\'
         }
-        let spacing = self.pgraph_spacing;
-        tape.skip_to_in_pgraph(spacing, |ch, _| !ch.is_ws());
-        let mut first_non_ws = tape.cur();
-        let fnw_pos = tape.pos;
-        if first_non_ws.is_none_or(|ch| ch != b'[' && ch != b'{') { // treat as incomplete macro
+        tape.consume_in_pgraph(self.pgraph_spacing, |ch, _| ch.is_ws());
+        let first_non_ws = tape.pos;
+        let mut next = tape.cur();
+        if next.is_none_or(|ch| ch != b'[' && ch != b'{') { // treat as incomplete macro
             return Some(tape); // stop at the first non-WS character after the macro name
         }
         self.tokens
-            .push(Token::new(TokenType::MacroHandle, start, first_non_alpha));
-        if first_non_ws == Some(b'[') {
-            if !tape.try_skip_to(|ch, _| ch == b']') {  // treat as incomplete macro
+            .push(Token::new(TokenType::MacroHandle { name: name.to_utf8() }, start, start + name.len() + 1));
+        if next == Some(b'[') {
+            if !tape.seek(|ch, _| ch == b']') {  // treat as incomplete macro
                 return Some(tape); // stop at '['
             }
+            let body = tape.slice_utf8(first_non_ws + 1,tape.pos);
             tape.adv(); // skip past ']'
-            self.emit(TokenType::MacroArgs, fnw_pos, tape.pos);
-            tape.skip_to_in_pgraph(spacing, |ch, _| !ch.is_ws());
-            first_non_ws = tape.cur();
-            // stop at the next non-WS character after the closing bracket
+            self.emit(TokenType::MacroArgs {body}, first_non_ws, tape.pos);
+            next = tape.cur();
+            // stop after ']'
         }
-        if first_non_ws == Some(b'{') {
-            if !tape.try_skip_to(|ch, _| ch == b'}') {  // treat as incomplete macro
+        while next == Some(b'{') {
+            if !tape.seek(|ch, _| ch == b'}') {  // treat as incomplete macro
                 return Some(tape); // stop at '{'
             }
+            let body = tape.slice_utf8(first_non_ws+1, tape.pos);
             tape.adv(); // skip past '}'
-            self.emit(TokenType::MacroBody, fnw_pos, tape.pos);
-            // stop at '}'
+            self.emit(TokenType::MacroBody{body}, first_non_ws, tape.pos);
+            // stop after '}'
         }
         Some(tape)
     }
