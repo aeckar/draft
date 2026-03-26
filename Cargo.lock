@@ -768,8 +768,10 @@ dependencies = [
  "boa_engine",
  "csv",
  "enum-ordinalize",
+ "memchr",
  "pulldown-cmark",
  "serde",
+ "thiserror",
 ]
 
 [[package]]
@@ -778,10 +780,6 @@ version = "0.1.0"
 
 [[package]]
 name = "malgam-lsp"
-version = "0.1.0"
-
-[[package]]
-name = "malgam-mgon"
 version = "0.1.0"
 
 [[package]]

@@ -41,3 +41,33 @@ impl CharExt for u8 {
         CHAR_TABLE[*self as usize] >> FLAG_BITS
     }
 }
+
+pub trait SliceExt {
+    /// Returns a subslice with leading and trailing white space removed,
+    /// according to the compiler.
+    fn trim_ws(&self) -> Self;
+}
+
+impl SliceExt for &[u8] {
+    #[inline(always)]
+    fn trim_ws(&self) -> Self {
+        let mut bytes = *self;
+        while let [first, rest @ ..] = bytes {
+            // peel off front
+            if first.is_flank_ws() {
+                bytes = rest;
+            } else {
+                break;
+            }
+        }
+        while let [rest @ .., last] = bytes {
+            // peel off back
+            if last.is_flank_ws() {
+                bytes = rest;
+            } else {
+                break;
+            }
+        }
+        bytes
+    }
+}

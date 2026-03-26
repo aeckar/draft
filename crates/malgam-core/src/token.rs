@@ -69,6 +69,7 @@ pub enum TokenType<'a> {
     InlineRawCode { body: &'a [u8] }, // `` ``
     InlineMath { body: &'a [u8] },    // $ $
     CodeBlock { body: &'a [u8], lang: &'a [u8] },
+    Admonition { label: &'a [u8] },
     MathBlock { body: &'a [u8] },
     InlineFormat { ty: InlineFormat },
     Checkbox { depth: u8, filled: bool },

@@ -18,6 +18,7 @@ ctrl-shift-L : take all highlighted occurences
 alt left, right : eh
 
 ctrl-. : open context menu/quick fix
+ctrl-shift-alt-X: vertical selection move
 
 (remove smart selection binidngs)
 

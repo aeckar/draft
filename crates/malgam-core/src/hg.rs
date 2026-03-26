@@ -1,19 +1,24 @@
 //! Don't check for UTF-8 correctness; leave that to the user.
 
-use crate::prelude::{CharExt, SliceExt};
+use crate::compile::Compile;
+use crate::ext::{CharExt, SliceExt};
 use crate::tape::Tape;
 use crate::token::{InlineFormat, Numbering, Token, TokenType};
 
 /// Dynamic configuration optionsset by the `\file` macro or by `config.mgon`.
+/// 
+/// These options can be changed at any point within a markup file by a macro.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MarkupConf {
+pub struct MalgamConf {
     ascii_math: bool,   // `ascii`
     code_lang: String,  // `code`
 }
 
 /// Static configuration options set using compiler flags or by `config.mgon`.
+/// 
+/// These options cannot be changed from within a markup file.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CompilerConf {
+pub struct MalcConf {
     /// If true, the compiler does not recognize inline
     /// math formatting to make writing finances easier. 
     finance_mode: bool,
@@ -43,39 +48,55 @@ struct FirstPassCtx {
     fmt_pairs: Vec<(usize, usize)>,
 }
 
-/// Contains global parser state.
+/// Malgam markup syntax.
+/// 
+/// todo explain compilation process
 #[derive(Debug)]
-pub struct Markup<'a> {
+pub struct Malgam<'a> {
     ///the tokens are generated in the pre-pass, and
     /// then used in the main pass to generate the output.
     tokens: Vec<Token<'a>>,
+
+    compiled: bool,
 
     /// The input text.
     pub input: &'a [u8],
 
     /// Dynamic configuration.
-    pub dyn_conf: &'a MarkupConf,
+    pub dyn_conf: &'a MalgamConf,
 
     /// Static configuration.
-    pub static_conf: &'a CompilerConf,
+    pub static_conf: &'a MalcConf,
 }
 
-impl<'a> Markup<'a> {
-    pub fn new(dyn_conf: &'a MarkupConf, static_conf: &'a CompilerConf, input: &'a [u8]) -> Self {
-        Self {
-            tokens: Vec::new(),
-            input,
-            dyn_conf,
-            static_conf,
-        }
-    }
+struct MalgamOutput;//todo
 
-    /// The entry point of the compiler.
-    /// 
-    /// todo
-    pub fn compile(&mut self) {
+impl<'a> Compile for Malgam<'a> {
+    type Output = ();
+
+    fn compile(&mut self) {
+        if self.compiled {
+            return;
+        }
         let pass1 = self.parse_virt_tokens();
         let pass2 = self.parse_txt_tokens();
+        self.compiled = true;
+    }
+
+    fn is_compiled(&self) -> bool {
+        self.compiled
+    }
+}
+
+impl<'a> Malgam<'a> {
+    pub fn new(conf: &'a MalgamConf, mgc_conf: &'a MalcConf, input: &'a [u8]) -> Self {
+        Self {
+            compiled: false,
+            tokens: Vec::new(),
+            input,
+            dyn_conf: conf,
+            static_conf: mgc_conf,
+        }
     }
 
     /// Pushes the token nside the input between the start and end indices.
@@ -212,8 +233,10 @@ impl<'a> Markup<'a> {
 
         // Because these symbols may show up in prose,
         // we should expect them to most likely be plain text first.
+        //
+        // This means we should minimize the # of match arms.
         while let Some(&ch) = self.input.get(tape.pos) {
-            let next_tape: Option<Tape<'a>> = match ch {
+            let jump: Option<Tape<'a>> = match ch {
                 // ordered by expected frequency
                 b'\n' => {
                     pass.pgraph_spacing = 2;
@@ -238,13 +261,13 @@ impl<'a> Markup<'a> {
                 b'"' | b'\'' => self.handle_quote(tape),
                 b'\\' => self.handle_bslash(tape),
                 b';' => {   // divider comment ';;' handled by editor
-                    tape.seek_at(b"\n"); // comment
+                    tape.seek_at(b"\n");
                     Some(tape)
                 }
                 _ => None,
             };
-            if let Some(next) = next_tape {
-                tape = next;
+            if let Some(jump) = jump {
+                tape = jump;
             }
             tape.adv();
         }
@@ -260,9 +283,14 @@ impl<'a> Markup<'a> {
     /// (shorthand or long-form) or plain text.
     #[must_use]
     fn handle_quote(&mut self, mut tape: Tape<'a>) -> Option<Tape<'a>> {
-        if let Some(tape) = self.handle_block(&mut tape, start, b"\n\"\"\"") || let Some(tape) = self.handle_block(&mut tape, start, b"\n'''") {
+        if let Some(tape) = self.handle_block(&mut tape, b"\n\"\"\"") {
             return Some(tape);
         }
+        if let Some(tape) = self.handle_block(&mut tape, b"\n'''") {
+            return Some(tape);
+        }
+        if 
+        ""
 
     }
 
@@ -469,7 +497,26 @@ impl<'a> Markup<'a> {
     fn handle_btick(&mut self, pass: &FirstPassCtx, mut tape: Tape<'a>) -> Option<Tape<'a>> {
         let start = tape.pos;
         let spacing = pass.pgraph_spacing;
-        if let Some(tape) = self.handle_block(&mut tape, start, b"\n```") {
+        if tape.is_at(b"```") {
+            if !tape.is_cur_prefix() {
+                return None;
+            }
+            tape.pos += 3; // skip over '```'
+            let lang = tape.consume(|ch, _| ch != b'\n');
+            let body_start = tape.pos + 1;
+            if !tape.seek_at(b"\n```") {
+                // failed lookahead
+                return None;
+            }
+            self.emit(
+                TokenType::CodeBlock {
+                    body: &tape.raw[body_start..tape.pos],
+                    lang: lang.trim_ws(),
+                },
+                start,
+                tape.pos + 1,
+            );
+            tape.pos += 3; // stop at last '`'
             return Some(tape);
         }
         if tape.is_at(b"``") {
@@ -499,36 +546,6 @@ impl<'a> Markup<'a> {
             tape.pos + 1,
         ));
         Some(tape) // stop at closing '`'
-    }
-
-
-    /// Resolves a code block or block quote.
-    /// 
-    /// `stop` is the 3-character delimiter 
-    fn handle_block(&mut self, tape: &mut Tape<'a>, start: usize, stop: &'static [u8]) -> Option<Tape<'a>> {
-        if tape.is_at(&stop[1..]) {
-            if !tape.is_cur_prefix() {
-                return None;
-            }
-            tape.pos += 3; // skip over '```'
-            let lang = tape.consume(|ch, _| ch != b'\n');
-            let body_start = tape.pos + 1;
-            if !tape.seek_at(stop) {
-                // failed lookahead
-                return None;
-            }
-            self.emit(
-                TokenType::CodeBlock {
-                    body: &tape.raw[body_start..tape.pos],
-                    lang: lang.trim_ws(),
-                },
-                start,
-                tape.pos + 1,
-            );
-            tape.pos += 3; // stop at last '`'
-            return Some(*tape);
-        }
-        None
     }
     
     /// Resolves whether a `*` character belongs to a bold token,

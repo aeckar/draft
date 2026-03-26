@@ -1,12 +1,43 @@
-use crate::prelude::{CharExt, count_indent};
+use crate::ext::{CharExt};
 
-/// Text input and an index associated with an element in it.
+/// Counts the number of tabs or the number of space characters divided by 4 (floored).
+/// 
+/// Used to determine separation between table cells and indentation of list items.
+/// For optimal performance, the given string should only consist of whitespace characters.
+/// 
+/// This is left private, as users should convert text to `Tape` first.
+fn count_indent(ws: &[u8]) -> u8 {
+    let mut tabs = 0;
+    let mut spaces = 0;
+    for &ch in ws {
+        if ch == b' ' {
+            spaces += 1;
+        } else if ch == b'\t' {
+            tabs += 1;
+        }
+    }
+    tabs + (spaces / 4)
+}
+
+/// A lightweight, zero-copy cursor over a byte slice.
+///
+/// Unlike a standard `Iterator`, `Tape` is designed specifically for 
+/// non-linear parsing:
+/// 
+/// * **Backtracking:** Supports moving the cursor backward (`dec`, `peek_back`) 
+///   and random access via slicing, which is essential for multi-character 
+///   delimiters and lookbehind checks.
+/// * **Zero-Copy Slicing:** Because it retains a reference to the `raw` buffer, 
+///   methods like `consume` can return efficient `&[u8]` sub-slices without 
+///   allocating new memory.
+/// * **State Snapshots:** Since `Tape` is `Copy`, it can be cheaply duplicated 
+///   to "try" a parsing branch and then discarded if the branch fails, 
+///   restoring the original position instantly.
+/// 
+/// `pos` is used to distinguish indices in a `Tape` from other data structures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Tape<'a> {
-    /// The input text.
     pub raw: &'a [u8],
-
-    /// The current position in the input.
     pub pos: usize,
 }
 
@@ -23,6 +54,10 @@ impl<'a> Iterator for Tape<'a> {
 impl<'a> Tape<'a> {
     pub fn new(raw: &'a [u8]) -> Self {
         Self { raw, pos: 0 }
+    }
+
+    pub unsafe fn to_uf8_unchecked(&self) -> &'a str {
+        unsafe { str::from_utf8_unchecked(&self.raw[self.pos..]) }
     }
 
     /// Returns the **current** character, if exists, before incrementing the current position.

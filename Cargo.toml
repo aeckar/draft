@@ -4,6 +4,5 @@ members = [
     "crates/malgam-cli",
     "crates/malgam-editor",
     "crates/malgam-lsp",
-    "crates/malgam-mgon",
 ]
 resolver = "2"
