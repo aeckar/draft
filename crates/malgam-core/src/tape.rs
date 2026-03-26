@@ -1,5 +1,5 @@
 use crate::ext::CharExt;
-use memchr::{memchr, memmem};
+use memchr::{memchr, memchr2, memchr3, memmem, memrchr2};
 
 /// Counts the number of tabs or the number of space characters divided by 4 (floored).
 /// 
@@ -282,6 +282,38 @@ impl<'a> Tape<'a> {
         false
     }
 
+    /// Advances `pos` to the first index where `pred` is true.
+    ///
+    /// Returns `true` if found and `pos` is left pointing at the match,
+    /// or `false` and `pos` is restored to its original value.
+    /// 
+    /// 
+    /// Optimized for single byte search using SIMD.
+    #[inline]
+    pub fn seek_ch2(&mut self, ch0: u8, ch1: u8) -> bool {
+        if let Some(offset) = memchr2(ch0, ch1, &self.raw[self.pos..]) {
+            self.pos += offset;
+            return true;
+        }
+        false
+    }
+
+    /// Advances `pos` to the first index where `pred` is true.
+    ///
+    /// Returns `true` if found and `pos` is left pointing at the match,
+    /// or `false` and `pos` is restored to its original value.
+    /// 
+    /// 
+    /// Optimized for single byte search using SIMD.
+    #[inline]
+    pub fn seek_ch3(&mut self, ch0: u8, ch1: u8, ch2: u8) -> bool {
+        if let Some(offset) = memchr3(ch0, ch1, ch2, &self.raw[self.pos..]) {
+            self.pos += offset;
+            return true;
+        }
+        false
+    }
+
     /// Advances `pos` to where `query` is found.
     ///
     /// Returns `true` if found and `pos` is left pointing at the match,
@@ -310,6 +342,8 @@ if let Some(offset) = memmem::find(&self.raw[self.pos..], query) {
     ///
     /// Returns `true` if found and `pos` is left pointing at the match,
     /// or `false` and `pos` is restored to its original value.
+    /// 
+    /// For multi-byte sequences, use `seek_at_in_pgraph`.
     #[inline]
     pub fn seek_ch_in_pgraph(&mut self, spacing: u8, query: u8) -> bool {
         self.seek_in_pgraph(spacing, |_, pos| self.raw[pos] == query)

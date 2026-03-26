@@ -461,7 +461,7 @@ impl<'a> Malgam<'a> {
             }
             tape.pos += 2; // skip over '$$'
             let body_start = tape.pos + 1;
-            if !tape.seek_at(b"\n$$") {
+            if !tape.seek_ch3(b'\n', b'$', b'$') {
                 // failed lookahead
                 return None;
             }
