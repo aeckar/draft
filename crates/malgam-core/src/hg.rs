@@ -261,7 +261,7 @@ impl<'a> Malgam<'a> {
                 b'"' | b'\'' => self.handle_quote(tape),
                 b'\\' => self.handle_bslash(tape),
                 b';' => {   // divider comment ';;' handled by editor
-                    tape.seek_at(b"\n");
+                    tape.seek_ch(b'\n');
                     Some(tape)
                 }
                 _ => None,
@@ -478,7 +478,7 @@ impl<'a> Malgam<'a> {
         if self.static_conf.finance_mode {
             return None;
         }
-        if !tape.seek_at_in_pgraph(pass.pgraph_spacing, b"$") {
+        if !tape.seek_ch_in_pgraph(pass.pgraph_spacing, b'$') {
             // failed lookahead
             return None; // stop at '$'
         }
@@ -534,7 +534,7 @@ impl<'a> Malgam<'a> {
             );
             return Some(tape);
         }
-        if !tape.seek_at_in_pgraph(spacing, b"`") {
+        if !tape.seek_ch_in_pgraph(spacing, b'`') {
             // failed lookahead
             return None; // stop at '`'
         }
@@ -592,7 +592,7 @@ impl<'a> Malgam<'a> {
             start + name.len() + 1,
         ));
         if next == Some(b'[') {
-            if !tape.seek_at(b"]") {
+            if !tape.seek_ch(b']') {
                 // treat as incomplete macro
                 return Some(tape); // stop at '['
             }
@@ -609,7 +609,7 @@ impl<'a> Malgam<'a> {
             // stop after ']'
         }
         while next == Some(b'{') {
-            if !tape.seek_at(b"}") {
+            if !tape.seek_ch(b'}') {
                 // treat as incomplete macro
                 return Some(tape); // stop at '{'
             }

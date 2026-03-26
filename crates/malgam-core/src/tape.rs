@@ -1,4 +1,5 @@
-use crate::ext::{CharExt};
+use crate::ext::CharExt;
+use memchr::{memchr, memmem};
 
 /// Counts the number of tabs or the number of space characters divided by 4 (floored).
 /// 
@@ -7,15 +8,11 @@ use crate::ext::{CharExt};
 /// 
 /// This is left private, as users should convert text to `Tape` first.
 fn count_indent(ws: &[u8]) -> u8 {
-    let mut tabs = 0;
-    let mut spaces = 0;
-    for &ch in ws {
-        if ch == b' ' {
-            spaces += 1;
-        } else if ch == b'\t' {
-            tabs += 1;
-        }
-    }
+let (tabs, spaces) = ws.iter().fold((0, 0), |(t, s), &ch| match ch {
+        b'\t' => (t + 1, s),
+        b' ' => (t, s + 1),
+        _ => (t, s),
+    });
     tabs + (spaces / 4)
 }
 
@@ -35,6 +32,8 @@ fn count_indent(ws: &[u8]) -> u8 {
 ///   restoring the original position instantly.
 /// 
 /// `pos` is used to distinguish indices in a `Tape` from other data structures.
+/// It is not guaranteed to be within the acceptable range of indices at any given point,
+/// but member functions assume so.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Tape<'a> {
     pub raw: &'a [u8],
@@ -249,7 +248,7 @@ impl<'a> Tape<'a> {
         }
     }
 
-    /// Advances `pos` until `pred` returns true.
+    /// Advances `pos` to the first index where `pred` is true.
     ///
     /// Returns `true` if found and `pos` is left pointing at the match,
     /// or `false` and `pos` is restored to its original value.
@@ -267,13 +266,35 @@ impl<'a> Tape<'a> {
         }
     }
 
-    /// Advances `pos` until `query` is found.
+    /// Advances `pos` to the first index where `pred` is true.
     ///
     /// Returns `true` if found and `pos` is left pointing at the match,
     /// or `false` and `pos` is restored to its original value.
+    /// 
+    /// 
+    /// Optimized for single byte search using SIMD.
+    #[inline]
+    pub fn seek_ch(&mut self, query: u8) -> bool {
+        if let Some(offset) = memchr(query, &self.raw[self.pos..]) {
+            self.pos += offset;
+            return true;
+        }
+        false
+    }
+
+    /// Advances `pos` to where `query` is found.
+    ///
+    /// Returns `true` if found and `pos` is left pointing at the match,
+    /// or `false` and `pos` is restored to its original value.
+    /// 
+    /// Optimized using Two-Way search algorithm.
     #[inline]
     pub fn seek_at(&mut self, query: &'a [u8]) -> bool {
-        self.seek(|_, pos| self.raw[pos..].starts_with(query))
+if let Some(offset) = memmem::find(&self.raw[self.pos..], query) {
+            self.pos += offset;
+            return true;
+        }
+        false
     }
 
     /// Advances `pos` until `query` is found within the current paragraph.
@@ -283,6 +304,15 @@ impl<'a> Tape<'a> {
     #[inline]
     pub fn seek_at_in_pgraph(&mut self, spacing: u8, query: &'a [u8]) -> bool {
         self.seek_in_pgraph(spacing, |_, pos| self.raw[pos..].starts_with(query))
+    }
+
+    /// Advances `pos` until `query` is found within the current paragraph.
+    ///
+    /// Returns `true` if found and `pos` is left pointing at the match,
+    /// or `false` and `pos` is restored to its original value.
+    #[inline]
+    pub fn seek_ch_in_pgraph(&mut self, spacing: u8, query: u8) -> bool {
+        self.seek_in_pgraph(spacing, |_, pos| self.raw[pos] == query)
     }
 
     /// Advances `pos` until `pred` returns true within the current paragraph.
