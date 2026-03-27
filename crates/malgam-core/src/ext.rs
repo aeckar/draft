@@ -1,18 +1,31 @@
-const IS_WS: u8 = 1 << 0; // 0000_0001
-const FLAG_BITS: u8 = 1;
+const IS_HG_WS: u8 = 1 << 0; // 0000_0001
+const IS_HGON_KEY_PART: u8 = 1 << 1;    // 0000_0010
+const FLAG_BITS: u8 = 2;
 
 /// Exactly 256 bytes—one for every possible u8 value.
 const CHAR_TABLE: [u8; 256] = {
     let mut table = [0u8; 256];
-    table[b' ' as usize] = IS_WS | (1 << FLAG_BITS);
-    table[b'\t' as usize] = IS_WS | (4 << FLAG_BITS);
-    table[b'\n' as usize] = IS_WS;
-    table[b'\r' as usize] = IS_WS | (1 << FLAG_BITS);
+    table[b' ' as usize] = IS_HG_WS | (1 << FLAG_BITS);
+    table[b'\t' as usize] = IS_HG_WS | (4 << FLAG_BITS);
+    table[b'\n' as usize] = IS_HG_WS;
+    table[b'\r' as usize] = IS_HG_WS | (1 << FLAG_BITS);
+    
+    let bytes = concat!(
+        "abcdefghijklmnopqrstuvwxyz",
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        "0123456789",
+        "-_.$"
+    ).as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        table[bytes[i] as usize] = IS_HGON_KEY_PART;
+        i += 1;
+    }
     table
 };
 
 pub trait CharExt {
-    /// Returns true if the given character is a flanking
+    /// Returns true if this is a flanking
     /// whitespace character (space, tab, newline, or carriage return).
     ///
     /// This is used to determine whether certain characters
@@ -21,42 +34,52 @@ pub trait CharExt {
     /// 
     /// Recognition of these whitespace characters extends to HGON also.
     #[must_use]
-    fn is_flank_ws(&self) -> bool;
+    fn is_hg_ws(&self) -> bool;
 
     /// Returns the length of the given flanking whitespace character,
     /// where a tab counts as 4 spaces and space counts as 1.
     ///
     /// All other characters return a length of 0.
     #[must_use]
-    fn flank_ws_len(&self) -> u8;
+    fn hg_ws_len(&self) -> u8;
+
+    /// Returns true if this character may be part of an unescaped key
+    /// in an HGON object.
+    /// 
+    /// Letters, digits, dashes, underscores, dots, and dollar signs are accepted.
+    fn is_hgon_key_part(&self) -> bool;
 }
 
 impl CharExt for u8 {
     #[inline(always)]
-    fn is_flank_ws(&self) -> bool {
-        (CHAR_TABLE[*self as usize] & IS_WS) != 0
+    fn is_hgon_key_part(&self) -> bool {
+        (CHAR_TABLE[*self as usize] & IS_HGON_KEY_PART) != 0
     }
 
     #[inline(always)]
-    fn flank_ws_len(&self) -> u8 {
+    fn is_hg_ws(&self) -> bool {
+        (CHAR_TABLE[*self as usize] & IS_HG_WS) != 0
+    }
+
+    #[inline(always)]
+    fn hg_ws_len(&self) -> u8 {
         // Shift the stored length value back down
         CHAR_TABLE[*self as usize] >> FLAG_BITS
     }
 }
 
 pub trait SliceExt {
-    /// Returns a subslice with leading and trailing white space removed,
-    /// according to the compiler.
-    fn trim_ws(&self) -> Self;
+    /// Returns a subslice with leading and trailing flanking white space removed.
+    fn trim_hg_ws(&self) -> Self;
 }
 
 impl SliceExt for &[u8] {
     #[inline(always)]
-    fn trim_ws(&self) -> Self {
+    fn trim_hg_ws(&self) -> Self {
         let mut bytes = *self;
         while let [first, rest @ ..] = bytes {
             // peel off front
-            if first.is_flank_ws() {
+            if first.is_hg_ws() {
                 bytes = rest;
             } else {
                 break;
@@ -64,7 +87,7 @@ impl SliceExt for &[u8] {
         }
         while let [rest @ .., last] = bytes {
             // peel off back
-            if last.is_flank_ws() {
+            if last.is_hg_ws() {
                 bytes = rest;
             } else {
                 break;

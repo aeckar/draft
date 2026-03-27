@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::num::ParseFloatError;
-use std::str;
 
 use thiserror::Error;
 
@@ -25,6 +24,8 @@ pub type HgonResult = Result<HgonValue, HgonError>;
 /// The `fmt` (and as a result, `to_string`) implementations emit the
 /// most concise object notation possible. Pretty printing is supported via the
 /// `pfmt` and `to_pstring` functions. Strings are always enclosed using `"`.
+/// 
+/// Underscores and dashes are treated as the same character. Keys can be
 #[derive(Debug, Clone, PartialEq)]
 pub enum HgonValue {
     Null,
@@ -201,16 +202,15 @@ impl<'a> Hgon<'a> {
         }
     }
 
-fn parse_obj(&mut self, mut tape: Tape<'a>) -> HgonResult {
+    fn parse_obj(&mut self, mut tape: Tape<'a>) -> HgonResult {
+        tape.adv(); // skip '.'
         if tape.cur() != Some(b'{') {
             return Err(HgonError::IllegalCharacter { ch: tape.cur().unwrap_or(0), pos: tape.pos });
         }
         tape.adv(); // skip '{'
-
-        let mut map = std::collections::HashMap::new();
-
+        let mut map = HashMap::new();
         loop {
-            tape.seek(|ch,_| !ch.is_flank_ws());
+            tape.consume(|ch,_| ch.is_hg_ws());
             if tape.cur() == Some(b'}') {
                 tape.adv();
                 break;
@@ -223,7 +223,7 @@ fn parse_obj(&mut self, mut tape: Tape<'a>) -> HgonResult {
             }
             let key = unsafe { std::str::from_utf8_unchecked(key_slice) }.to_string();
 
-            tape.seek(|ch,_| !ch.is_flank_ws());
+            tape.seek(|ch,_| !ch.is_hg_ws());
             if tape.cur() != Some(b':') {
                 return Err(HgonError::IllegalCharacter { ch: tape.cur().unwrap_or(0), pos: tape.pos });
             }
@@ -234,7 +234,7 @@ fn parse_obj(&mut self, mut tape: Tape<'a>) -> HgonResult {
             map.insert(key, val);
 
             // 3. Handle Delimiters
-            tape.seek(|ch,_| !ch.is_flank_ws());
+            tape.seek(|ch,_| !ch.is_hg_ws());
             if tape.cur() == Some(b',') {
                 tape.adv();
             }
@@ -245,9 +245,8 @@ fn parse_obj(&mut self, mut tape: Tape<'a>) -> HgonResult {
 
     fn parse_list(&mut self, mut tape: Tape<'a>) -> HgonResult {
         let mut items = Vec::new();
-
         loop {
-            tape.seek(|ch,_| !ch.is_flank_ws());
+            tape.seek(|ch,_| !ch.is_hg_ws());
             if tape.cur() == Some(b'}') {
                 tape.adv();
                 break;
@@ -260,7 +259,7 @@ fn parse_obj(&mut self, mut tape: Tape<'a>) -> HgonResult {
             let val = self.parse_any(tape)?;
             items.push(val);
 
-            tape.seek(|ch,_| !ch.is_flank_ws());
+            tape.seek(|ch,_| !ch.is_hg_ws());
             if tape.cur() == Some(b',') {
                 tape.adv();
             } else if tape.cur() != Some(b'}') {
@@ -268,7 +267,6 @@ fn parse_obj(&mut self, mut tape: Tape<'a>) -> HgonResult {
                 return Err(HgonError::IllegalCharacter { ch: tape.cur().unwrap_or(0), pos: tape.pos });
             }
         }
-
         Ok(HgonValue::List(items))
     }
 }

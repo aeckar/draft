@@ -415,7 +415,7 @@ impl<'a> Malgam<'a> {
         if tape.is_at(b"--") {
             tape.pos += 2;
             let tail = tape.consume(|ch, _| ch != b'\n');
-            if tail.iter().all(|ch| ch.is_flank_ws()) {
+            if tail.iter().all(|ch| ch.is_hg_ws()) {
                 self.emit_cur(tape, TokenType::HorizontalRule, 3);
                 tape.dec();
                 return Some(tape); // stop at last '-'
@@ -511,7 +511,7 @@ impl<'a> Malgam<'a> {
             self.emit(
                 TokenType::CodeBlock {
                     body: &tape.raw[body_start..tape.pos],
-                    lang: lang.trim_ws(),
+                    lang: lang.trim_hg_ws(),
                 },
                 start,
                 tape.pos + 1,
