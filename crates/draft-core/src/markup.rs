@@ -3,14 +3,14 @@
 use crate::compile::Compile;
 use crate::ext::{CharExt, SliceExt};
 use crate::tape::Tape;
-use crate::token::{InlineFormat, Numbering, Token, TokenType};
+use crate::token::{CheckboxType, InlineFormat, Numbering, Token, TokenType};
 
 /// Dynamic configuration optionsset by the `\file` macro or by `config.mgon`.
 /// 
 /// These options can be changed at any point within a markup file by a macro.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MalgamConf {
-    ascii_math: bool,   // `ascii`
+pub struct DynConf {
+    latex_math: bool,   // `latex`
     code_lang: String,  // `code`
 }
 
@@ -18,11 +18,20 @@ pub struct MalgamConf {
 /// 
 /// These options cannot be changed from within a markup file.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MalcConf {
+pub struct StaticConf {
     /// If true, the compiler does not recognize inline
     /// math formatting to make writing finances easier. 
     finance_mode: bool,
-}
+
+    /// If true, the compiler does not perform a first pass to
+    /// ensure the input is valid UTF-8.
+    /// 
+    /// todo link sanitization
+    /// todo protocol sanitization
+    /// 
+    /// ... extended to macro-generated output (there is either SAFE/NETWORK or FAST/LOCAL)
+    trusted_mode: bool,
+}   // todo change to bitfield
 
 /// Encapsulates mutable state shared between different handlers during Pass 1.
 struct FirstPassCtx {
@@ -38,8 +47,16 @@ struct FirstPassCtx {
     /// A stack of positions of the first character of openers that
     /// have been resolved but not yet paired with a closer.
     ///
-    /// The first element of each pair is the flank type enum.
+    /// The first element of each pair is the flank type mask.
     open_fmts: Vec<(u8, usize)>,
+
+    /// A stack of positions of the first character of block quote openers that
+    /// have been resolved but not yet paired with a closer.
+    /// 
+    /// Block quotes can be nested, but the characters used must match.
+    /// 
+    /// The first element of eac8h pair is whether double quotes were used.
+    open_quotes: Vec<(bool, usize)>,
 
     /// The positions of all format marker pairs currently resolved.
     ///
@@ -48,11 +65,11 @@ struct FirstPassCtx {
     fmt_pairs: Vec<(usize, usize)>,
 }
 
-/// Malgam markup syntax.
+/// Draft markup syntax.
 /// 
 /// todo explain compilation process
 #[derive(Debug)]
-pub struct Malgam<'a> {
+pub struct MarkupFile<'a> {
     ///the tokens are generated in the pre-pass, and
     /// then used in the main pass to generate the output.
     tokens: Vec<Token<'a>>,
@@ -63,23 +80,24 @@ pub struct Malgam<'a> {
     pub input: &'a [u8],
 
     /// Dynamic configuration.
-    pub dyn_conf: &'a MalgamConf,
+    pub dyn_conf: &'a DynConf,
 
     /// Static configuration.
-    pub static_conf: &'a MalcConf,
+    pub static_conf: &'a StaticConf,
 }
 
-struct MalgamOutput;//todo
+struct MarkupOutput;//todo
 
-impl<'a> Compile for Malgam<'a> {
+impl<'a> Compile for MarkupFile<'a> {
     type Output = ();
 
     fn compile(&mut self) {
         if self.compiled {
             return;
         }
-        let pass1 = self.parse_virt_tokens();
-        let pass2 = self.parse_txt_tokens();
+        let pass1 = self.validate_utf8();
+        let pass2 = self.parse_virt_tokens();
+        let pass3 = self.parse_txt_tokens();
         self.compiled = true;
     }
 
@@ -88,8 +106,8 @@ impl<'a> Compile for Malgam<'a> {
     }
 }
 
-impl<'a> Malgam<'a> {
-    pub fn new(conf: &'a MalgamConf, mgc_conf: &'a MalcConf, input: &'a [u8]) -> Self {
+impl<'a> MarkupFile<'a> {
+    pub fn new(conf: &'a DynConf, mgc_conf: &'a StaticConf, input: &'a [u8]) -> Self {
         Self {
             compiled: false,
             tokens: Vec::new(),
@@ -115,6 +133,15 @@ impl<'a> Malgam<'a> {
     }
 
     // ########################################## PASS 1 ##########################################
+
+    /// **PASS 1: VALIDATE_UTF8**
+    /// 
+    /// Returns true if the input is valid UTF-8, or false otherwise.
+    fn validate_utf8(&mut self) -> bool {
+
+    } 
+
+    // ########################################## PASS 2 ##########################################
 
     /// Attempts to emit a token if the character cluster
     /// belongs to a flanking token, such as an inline format or link.
@@ -219,7 +246,7 @@ impl<'a> Malgam<'a> {
             .collect();
     }
 
-    /// **PASS 1: PARSE VIRTUAL TOKENS**
+    /// **PASS 2: PARSE VIRTUAL TOKENS**
     ///
     /// todo
     fn parse_virt_tokens(&mut self) -> FirstPassCtx {
@@ -258,7 +285,7 @@ impl<'a> Malgam<'a> {
                 b'[' => self.handle_obrac(&mut pass, tape),
                 b']' => self.handle_cbrac(&pass, tape),
                 b'=' => self.handle_equals(&mut pass, tape),
-                b'"' | b'\'' => self.handle_quote(tape),
+                b'"' | b'\'' => self.handle_quote(&mut pass, tape, tape[tape.pos]),
                 b'\\' => self.handle_bslash(tape),
                 b';' => {   // divider comment ';;' handled by editor
                     tape.seek_ch(b'\n');
@@ -282,15 +309,40 @@ impl<'a> Malgam<'a> {
     /// Resolves whether a `'` or `"` character belongs to an admonition, a block quote
     /// (shorthand or long-form) or plain text.
     #[must_use]
-    fn handle_quote(&mut self, mut tape: Tape<'a>) -> Option<Tape<'a>> {
-        if let Some(tape) = self.handle_block(&mut tape, b"\n\"\"\"") {
-            return Some(tape);
-        }
-        if let Some(tape) = self.handle_block(&mut tape, b"\n'''") {
-            return Some(tape);
-        }
-        ""
+    fn handle_quote(&mut self, pass: &mut FirstPassCtx, mut tape: Tape<'a>, ty: u8) -> Option<Tape<'a>> {
+        // Would reuse logic for fenced code block, but that consumes inner content indiscrimantly
+        // Consequence of syntax is that unlabeled quote blocks cannot be nested
+        let start = tape.pos;
+        let delim = &[ty; 3];
+        if tape.is_at(delim) {
+            if !tape.is_cur_prefix() {
+                return None;
+            }
+            tape.pos += 3; // skip over `"""` 
+            let label = unsafe { String::from_utf8_unchecked(tape.consume(|ch, _| ch != b'\n').trim_hg_ws().to_vec()) };
 
+            if label.is_empty() {
+                if let Some(&(double,pos, )) = pass.open_quotes.last() && double == (ty == b'"') {
+                    self.emit(TokenType::BlockQuoteOpen { label })
+                    self.emit(
+                        TokenType::BlockQuoteClose,
+                        start,
+                        start + 3,
+                    );
+                    return Some(tape);
+                }
+                return None;
+            }
+            self.emit(
+                TokenType::BlockQuoteOpen {
+                    label: label.trim_hg_ws(),
+                },
+                start,
+                tape.pos,
+            );
+            return Some(tape);
+        }
+        None
     }
 
     /// Resolves whether a '[' character belongs to a link, an embed, or plain text.
@@ -364,20 +416,10 @@ impl<'a> Malgam<'a> {
         if prev.is_none() || !tape.is_prefix(tape.pos - 1) {
             return None;
         }
-        let ty = match prev.unwrap() {
-            b'd' => Numbering::Number,
-            b'a' => Numbering::Lower,
-            b'A' => Numbering::Upper,
-            b'r' => Numbering::LowerNumeral,
-            b'R' => Numbering::UpperNumeral,
-            _ => {
-                return None;
-            }
-        };
         self.emit(
             TokenType::NumberedItem {
                 depth: tape.count_indent(),
-                ty,
+                ty: Numbering::from_marker(prev.unwrap())?,
             },
             tape.pos - 1,
             tape.pos + 1,
@@ -390,17 +432,17 @@ impl<'a> Malgam<'a> {
     /// a checkbox, a horizontal rule, or plain text.
     #[must_use]
     fn handle_dash(&mut self, pass: &mut FirstPassCtx, mut tape: Tape<'a>) -> Option<Tape<'a>> {
-        if matches!(tape.peek_back(), Some(b'o') | Some(b'x')) {
+        if matches!(tape.peek_back(), Some(b'o') | Some(b'x') | Some(b'?')) {
             // checkbox
             tape.dec(); // decrement to enable check on line start
             if !tape.is_cur_prefix() {
                 return None;
             }
             self.emit_cur(
-                tape,
+                tape, 
                 TokenType::Checkbox {
                     depth: tape.count_indent(),
-                    filled: tape[tape.pos] == b'x',
+                    ty: CheckboxType::from_marker(tape[tape.pos])?,
                 },
                 2,
             );

@@ -1,6 +1,6 @@
-# `malgam-cli`: Malgam Command-Line Utility
+# `draft-cli`: Draft Command-Line Utility
 
-This crate contains the Malgam command-line application, `mal`. The program offers various subcommands to perform operations on Malgam documents or object notation.
+This crate contains the Draft command-line application, `mal`. The program offers various subcommands to perform operations on Draft documents or object notation.
 
 - `mal build <PATH>?` build to html, path or file
   - `-o`
@@ -20,6 +20,6 @@ This crate contains the Malgam command-line application, `mal`. The program offe
 - `mal conv <TO> <PATH>`
     - TO = [md, mal, malo, json, yaml, yml]
 
-## Malgam Document (`.mal`)
+## Draft Document (`.ft`)
 
 conf.malo

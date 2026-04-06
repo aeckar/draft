@@ -70,6 +70,11 @@ impl CharExt for u8 {
 pub trait SliceExt {
     /// Returns a subslice with leading and trailing flanking white space removed.
     fn trim_hg_ws(&self) -> Self;
+
+    /// Returns the UTF-8 String form of this slice.
+    /// 
+    /// Because we assume UTF-8 compatibility
+    fn as_utf8(&self) -> String;
 }
 
 impl SliceExt for &[u8] {
@@ -94,4 +99,5 @@ impl SliceExt for &[u8] {
         }
         bytes
     }
+    
 }

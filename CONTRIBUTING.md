@@ -1,18 +1,18 @@
-# Contributing to Malgam
+# Contributing to Draft
 
-Thank you for your interest in the **Malgam** suite! We're glad to have you on the project.
+Thank you for your interest in the **Draft** suite! We're glad to have you on the project.
 
-Malgam is a high-resolution markup ecosystem built for performance and precision. We maintain high standards for architectural integrity and idiomatic Rust.
+Draft is a high-resolution markup ecosystem built for performance and precision. We maintain high standards for architectural integrity and idiomatic Rust.
 
 ## 🛠️ Workspace Architecture
 
-Malgam is structured as a Rust Workspace. Please ensure your contributions are placed in the correct crate:
+Draft is structured as a Rust Workspace. Please ensure your contributions are placed in the correct crate:
 
-- **`malgam-core`**: The engine. Contains parsing, lexing, and transformation logic.
-- **`malgam-cli`**: The command-line interface (`mgc`).
-- **`malgam-editor`**: The visual text editor interface.
-- **`malgam-lsp`**: Language Server Protocol implementation.
-- **`malgam-mgon`**: Malgam Object Notation handling.
+- **`draft-core`**: The engine. Contains parsing, lexing, and transformation logic.
+- **`draft-cli`**: The command-line interface (`mgc`).
+- **`draft-editor`**: The visual text editor interface.
+- **`draft-lsp`**: Language Server Protocol implementation.
+- **`draft-mgon`**: Draft Object Notation handling.
 
 ## 🚀 Getting Started
 
@@ -32,12 +32,12 @@ Malgam is structured as a Rust Workspace. Please ensure your contributions are p
   ```bash
   cargo fmt --all
   ```
-- **Safety**: Avoid unsafe code unless strictly required for performance in malgam-core. All unsafe blocks must include a // SAFETY: comment.
+- **Safety**: Avoid unsafe code unless strictly required for performance in draft-core. All unsafe blocks must include a // SAFETY: comment.
 
 ### 2. Pull Request Process
 
 - **Atomic Commits**: Keep your commits focused. One feature or one bug fix per PR is preferred.
-- **The Prelude**: If you add new extension traits to core, ensure they are re-exported in malgam*core::prelude using the as * pattern to keep the API clean.
+- **The Prelude**: If you add new extension traits to core, ensure they are re-exported in draft*core::prelude using the as * pattern to keep the API clean.
 - **Testing**: Add unit tests for new logic. Run the full suite with cargo test.
 
 ### 3. Sustainable Development
@@ -48,4 +48,4 @@ We prioritize quality and developer longevity. We value deep-work sessions and t
 - **Communication**: We encourage clear, asynchronous communication.
 
 ## ⚖️ License
-By contributing to Malgam, you agree that your contributions will be licensed under the GNU Affero General Public License v3 (AGPL-3.0). This ensures the ecosystem remains free and open, even when provided over a network.
+By contributing to Draft, you agree that your contributions will be licensed under the GNU Affero General Public License v3 (AGPL-3.0). This ensures the ecosystem remains free and open, even when provided over a network.

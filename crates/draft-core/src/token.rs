@@ -14,6 +14,19 @@ pub enum Numbering {
     Continuation,
 }
 
+impl Numbering {
+    pub fn from_marker(marker: u8) -> Option<Self> {
+        match marker {
+            b'd' => Some(Numbering::Number),
+            b'a' => Some(Numbering::Lower),
+            b'A' => Some(Numbering::Upper),
+            b'r' => Some(Numbering::LowerNumeral),
+            b'R' => Some(Numbering::UpperNumeral),
+            _ => None
+        }
+    }
+}
+
 /// The type of inline format marker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ordinalize)]
 #[repr(u8)]
@@ -45,6 +58,24 @@ impl InlineFormat {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum CheckboxType {
+    Filled, Empty, Toggle
+}
+
+impl CheckboxType {
+    /// Returns the checkbox type according to the 
+    pub fn from_marker(marker: u8) -> Option<Self> {
+        match marker {
+            b'x' => Some(CheckboxType::Filled),
+            b'o' => Some(CheckboxType::Empty),
+            b'?' => Some(CheckboxType::Interactable),
+            _ => None
+        }
+    }
+}
+
 /// The class and payload of a token.
 ///
 /// Tokens are categorized based on their unique function and listener logic.
@@ -58,7 +89,9 @@ pub enum TokenType<'a> {
     HorizontalRule, // doubles as row divider, if enabled
     LinkMarker,
     EmbedMarker,
-    Literal { ch: u8 },
+    BlockQuoteOpen { label: &'a [u8] }, // blank if not admonition
+    BlockQuoteClose,
+    Literal { ch: u8 }, // preceded by `\`
     LinkBody { href: &'a [u8] },       // ]( )
     LinkAliasBody { alias: &'a [u8] }, // ][ ]
     MacroHandle { name: &'a [u8] },    // \
@@ -72,7 +105,7 @@ pub enum TokenType<'a> {
     Admonition { label: &'a [u8] },
     MathBlock { body: &'a [u8] },
     InlineFormat { ty: InlineFormat },
-    Checkbox { depth: u8, filled: bool },
+    Checkbox { depth: u8, ty: CheckboxType },
     ListItem { depth: u8 },
     NumberedItem { depth: u8, ty: Numbering },
     AliasMarker { alias: &'a [u8] },

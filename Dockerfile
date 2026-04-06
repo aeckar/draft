@@ -20,7 +20,7 @@ RUN cargo build --release --workspace
 FROM debian:bookworm-slim AS runtime
 WORKDIR /app
 # Copy only the binaries you need (CLI and Converter)
-COPY --from=builder /app/target/release/malgam-cli /usr/local/bin/
-COPY --from=builder /app/target/release/malgam-convert /usr/local/bin/
+COPY --from=builder /app/target/release/draft-cli /usr/local/bin/
+COPY --from=builder /app/target/release/draft-convert /usr/local/bin/
 
-ENTRYPOINT ["malgam-cli"]
+ENTRYPOINT ["draft-cli"]

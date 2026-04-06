@@ -381,6 +381,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "draft-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "draft-core",
+]
+
+[[package]]
+name = "draft-core"
+version = "0.1.0"
+dependencies = [
+ "boa_engine",
+ "csv",
+ "enum-ordinalize",
+ "memchr",
+ "pulldown-cmark",
+ "serde",
+ "simdutf8",
+ "thiserror",
+]
+
+[[package]]
+name = "draft-editor"
+version = "0.1.0"
+
+[[package]]
+name = "draft-lsp"
+version = "0.1.0"
+
+[[package]]
 name = "dynify"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -752,36 +783,6 @@ checksum = "224399e74b87b5f3557511d98dff8b14089b3dadafcab6bb93eab67d3aace965"
 dependencies = [
  "scopeguard",
 ]
-
-[[package]]
-name = "malgam-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "malgam-core",
-]
-
-[[package]]
-name = "malgam-core"
-version = "0.1.0"
-dependencies = [
- "boa_engine",
- "csv",
- "enum-ordinalize",
- "memchr",
- "pulldown-cmark",
- "serde",
- "thiserror",
-]
-
-[[package]]
-name = "malgam-editor"
-version = "0.1.0"
-
-[[package]]
-name = "malgam-lsp"
-version = "0.1.0"
 
 [[package]]
 name = "memchr"
@@ -1208,6 +1209,12 @@ dependencies = [
  "serde_core",
  "zmij",
 ]
+
+[[package]]
+name = "simdutf8"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
 name = "siphasher"

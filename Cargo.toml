@@ -1,8 +1,8 @@
 [workspace]
 members = [
-    "crates/malgam-core",
-    "crates/malgam-cli",
-    "crates/malgam-editor",
-    "crates/malgam-lsp",
+    "crates/draft-core",
+    "crates/draft-cli",
+    "crates/draft-editor",
+    "crates/draft-lsp",
 ]
 resolver = "2"

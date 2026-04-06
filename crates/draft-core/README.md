@@ -1,17 +1,17 @@
-# `malgam-core`: Malgam Core Utilities
+# `draft-core`: Draft Core Utilities
 
-This crate contains core utilities used to manipulate Malgam markup and object notation. This library is used to:
+This crate contains core utilities used to manipulate Draft markup and object notation. This library is used to:
 
 - Compile markup to a static site (see `mal build`)
 - Parse markup and object notation
 - Transform markup to Markdown, and vice-versa
 - Transform Malo to JSON, and vice-versa
 
-The `mal` program, implemented in the `malgam-cli` crate, is mostly a wrapper over this library. It enables idiomatic manipulation of `.mal` and `.malo` files over the command-line, as well as a way for external programs to access the features listed above.
+The `mal` program, implemented in the `draft-cli` crate, is mostly a wrapper over this library. It enables idiomatic manipulation of `.mal` and `.malo` files over the command-line, as well as a way for external programs to access the features listed above.
 
-## The Malgam Language
+## The Draft Language
 
-**Malgam** is an ergonomic, extensible markup language inspired by Markdown. It is denoted by a `.mal` file extension.
+**Draft** is an ergonomic, extensible markup language inspired by Markdown. It is denoted by a `.mal` file extension.
 
 ### **2. Specification**
 
@@ -19,11 +19,11 @@ The `mal` program, implemented in the `malgam-cli` crate, is mostly a wrapper ov
 
 Headings are designated by 1-6 leading `=` characters.
 
-Unlike in Markdown, these do not need to be followed by a whitespace character to be recognized. Also unlike Markdown, Malgam does not support the alternative syntax of headings with a line of `=` or `-` characters on the next line.
+Unlike in Markdown, these do not need to be followed by a whitespace character to be recognized. Also unlike Markdown, Draft does not support the alternative syntax of headings with a line of `=` or `-` characters on the next line.
 
 Though it is recommended to not include a trailing whitespace character, the inclusion of one **will not** break formatting but **will** be trimmed off in the rendered output.
 
-| Malgam                | HTML                       | Rendered output          |
+| Draft                | HTML                       | Rendered output          |
 | --------------------- | -------------------------- | ------------------------ |
 | =Heading level 1      | \<h1>Heading level 1\</h1> | <h1>Heading level 1</h1> |
 | ==Heading level 2     | \<h2>Heading level 2\</h2> | <h2>Heading level 2</h2> |
@@ -32,20 +32,20 @@ Though it is recommended to not include a trailing whitespace character, the inc
 | =====Heading level 5  | \<h5>Heading level 5\</h5> | <h4>Heading level 5</h5> |
 | ======Heading level 6 | \<h6>Heading level 6\</h6> | <h5>Heading level 6</h6> |
 
-If the formatter is run periodically, best practice is to leave headings lowercase. When `mal fmt` is run, the content is spellchecked and put into title case.
+If the formatter is run periodically, best practice is to leave headings lowercase. When `mal fmt` is run, the content is spellchecked and put into title case automatically.
 
 #### **Lists**
 
-Malgam supports both unordered and ordered lists. 
+Draft supports both unordered and ordered lists. 
 
 
 ### **3. Best Practices**
 
-## Malgam Object Notation
+## Draft Object Notation
 
-**Malo** is an ergonomic, human-readable data serialization format derived from the Malgam. It is denoted by a `.malo` file extension.
+**Malo** is an ergonomic, human-readable data serialization format derived from the Draft. It is denoted by a `.malo` file extension.
 
-While it shares similarities with JSON, it prioritizes ergonomic manual editing through features like flexible string quoting and trailing commas. There also exists a distinct syntax for lists and objects which respects Malgam macro syntax when such objects are used as macro arguments.
+While it shares similarities with JSON, it prioritizes ergonomic manual editing through features like flexible string quoting and trailing commas. There also exists a distinct syntax for lists and objects which respects Draft macro syntax when such objects are used as macro arguments.
 
 wrap is handled by alt-z
 
@@ -112,7 +112,7 @@ The `HgonValue` implementation provides two ways to turn data back into strings:
 
 ```malo
 .{
-    project-name = "Malgam",
+    project-name = "Draft",
     version = 1.0,
     tags = {"compiler", "rust", "fast"},
     metadata = .{

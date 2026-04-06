@@ -8,7 +8,7 @@ use crate::compile::Compile;
 use crate::ext::CharExt;
 use crate::tape::Tape;
 
-pub type MaloResult = Result<MaloValue, MaloError>;
+pub type ObjectResult = Result<ObjectValue, ObjectError>;
 
 /// An instance of an `malo` data type.
 /// 
@@ -27,16 +27,16 @@ pub type MaloResult = Result<MaloValue, MaloError>;
 /// 
 /// Keys can be
 #[derive(Debug, Clone, PartialEq)]
-pub enum MaloValue {
+pub enum ObjectValue {
     Null,
     Bool(bool),
     Number(f64),
     String(String),
-    List(Vec<MaloValue>),
-    Object(HashMap<String, MaloValue>),
+    List(Vec<ObjectValue>),
+    Object(HashMap<String, ObjectValue>),
 }
 
-impl Display for MaloValue {
+impl Display for ObjectValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Null => write!(f, "null"),
@@ -64,7 +64,7 @@ impl Display for MaloValue {
     }
 }
 
-impl MaloValue {
+impl ObjectValue {
     pub fn to_pstring(&self) -> String {
         let mut buf = String::new();
         // Start with 0 indentation
@@ -111,7 +111,7 @@ impl MaloValue {
 
 /// Describes and locates a specific error in `hgon` syntax. 
 #[derive(Error, Debug, Clone)]
-pub enum MaloError {
+pub enum ObjectError {
     #[error("Expected a value at index {pos}")]
     MissingValue { pos: usize },
 
@@ -125,17 +125,17 @@ pub enum MaloError {
     MissingCloser { open: u8, close: u8, open_pos: usize }
 }
 
-/// Malgam Object Notation (HGON) syntax.
-pub struct Malo<'a> {
+/// Draft Object Notation (DON) syntax.
+pub struct ObjectFile<'a> {
     /// The input text.
     pub input: &'a [u8],
 
     compiled: bool,
-    value: MaloResult,
+    value: ObjectResult,
 }
 
-impl<'a> Compile for Malo<'a> {
-    type Output = MaloResult;
+impl<'a> Compile for ObjectFile<'a> {
+    type Output = ObjectResult;
 
     fn compile(&mut self) -> Self::Output {
         if self.compiled {
@@ -151,30 +151,30 @@ impl<'a> Compile for Malo<'a> {
     }
 }
 
-impl<'a> Malo<'a> {
+impl<'a> ObjectFile<'a> {
     pub fn new(input: &'a [u8]) -> Self {
         Self {
             input,
             compiled: false,
-            value: Ok(MaloValue::Null),
+            value: Ok(ObjectValue::Null),
         }
     }
 
-    fn parse_any(&mut self, tape: &mut Tape<'a>) -> MaloResult {
+    fn parse_any(&mut self, tape: &mut Tape<'a>) -> ObjectResult {
         let start = tape.pos;
 
         // trivial cases
         if tape.cur().is_none() {
-            return Err(MaloError::MissingValue { pos: start });
+            return Err(ObjectError::MissingValue { pos: start });
         }
         if tape.is_at(b"true") {
-            return Ok(MaloValue::Bool(true));
+            return Ok(ObjectValue::Bool(true));
         }
         if tape.is_at(b"false") {
-            return Ok(MaloValue::Bool(false));
+            return Ok(ObjectValue::Bool(false));
         }
         if tape.is_at(b"null") {
-            return Ok(MaloValue::Null);
+            return Ok(ObjectValue::Null);
         }
 
         let ch = tape.cur().unwrap();
@@ -183,32 +183,32 @@ impl<'a> Malo<'a> {
             b'{' => self.parse_list(tape),
             b'"' => {
                 if !tape.seek_at_in_pgraph(1, b"\"") {
-                    Err(MaloError::MissingCloser { open: b'"', close: b'"', open_pos: start })
+                    Err(ObjectError::MissingCloser { open: b'"', close: b'"', open_pos: start })
                 } else {
-                    Ok(MaloValue::String( unsafe { tape.to_uf8_unchecked() }[start..tape.pos].to_string()))
+                    Ok(ObjectValue::String( unsafe { tape.to_uf8_unchecked() }[start..tape.pos].to_string()))
                 }
             },
             b'\'' => {
                 if !tape.seek_at_in_pgraph(1, b"'") {
-                    Err(MaloError::MissingCloser { open: b'\'', close: b'\'', open_pos: start })
+                    Err(ObjectError::MissingCloser { open: b'\'', close: b'\'', open_pos: start })
                 } else {
-                    Ok(MaloValue::String( unsafe { tape.to_uf8_unchecked() }[start..tape.pos].to_string()))
+                    Ok(ObjectValue::String( unsafe { tape.to_uf8_unchecked() }[start..tape.pos].to_string()))
                 }
             }
             b'0'..=b'9' =>                 unsafe { tape.to_uf8_unchecked().parse::<f64>() }
-                    .map(|n| MaloValue::Number(n))
-                    .map_err(|e| MaloError::InvalidNumber(e)),
-            b';' => {   // same comment style as Malgam
-                Err(MaloError::MissingValue { pos: start })
+                    .map(|n| ObjectValue::Number(n))
+                    .map_err(|e| ObjectError::InvalidNumber(e)),
+            b';' => {   // same comment style as markup
+                Err(ObjectError::MissingValue { pos: start })
             }
-            _ => Err(MaloError::IllegalCharacter { ch, pos: start })
+            _ => Err(ObjectError::IllegalCharacter { ch, pos: start })
         }
     }
 
-    fn parse_obj(&mut self, tape: &mut Tape<'a>) -> MaloResult {
+    fn parse_obj(&mut self, tape: &mut Tape<'a>) -> ObjectResult {
         tape.adv(); // skip '.'
         if tape.cur() != Some(b'{') {   // should not be checked beforehand
-            return Err(MaloError::IllegalCharacter { ch: tape.cur().unwrap_or(0), pos: tape.pos });
+            return Err(ObjectError::IllegalCharacter { ch: tape.cur().unwrap_or(0), pos: tape.pos });
         }
         let open_pos = tape.pos;
         tape.adv(); // skip '{'
@@ -220,7 +220,7 @@ impl<'a> Malo<'a> {
             // get current character
             let ch = tape.cur();
             if ch.is_none() {
-                return Err(MaloError::MissingCloser { open: b'{', close: b'}', open_pos })
+                return Err(ObjectError::MissingCloser { open: b'{', close: b'}', open_pos })
             }
             let ch = ch.unwrap();
 
@@ -246,23 +246,23 @@ impl<'a> Malo<'a> {
                 key = tape.consume(|ch, _| ch.is_hgon_key_part());
             }
             if key.is_empty() {
-                return Err(MaloError::MissingValue { pos: tape.pos });
+                return Err(ObjectError::MissingValue { pos: tape.pos });
             }
             let key = unsafe { str::from_utf8_unchecked(key) }.to_string();
 
             tape.consume(|ch,_| ch.is_hg_ws());
             if tape.cur() != Some(b'=') {
-                return Err(MaloError::IllegalCharacter { ch: tape.cur().unwrap_or(0), pos: tape.pos });
+                return Err(ObjectError::IllegalCharacter { ch: tape.cur().unwrap_or(0), pos: tape.pos });
             }
             tape.adv(); // skip '='
             tape.consume(|ch,_| ch.is_hg_ws());
             let val = self.parse_any(tape)?;
             map.insert(key, val);
         } 
-        Ok(MaloValue::Object(map))
+        Ok(ObjectValue::Object(map))
     }
 
-    fn parse_list(&mut self, tape: &mut Tape<'a>) -> MaloResult {
+    fn parse_list(&mut self, tape: &mut Tape<'a>) -> ObjectResult {
         let mut items = Vec::new();
         loop {
             tape.consume(|ch,_| ch.is_hg_ws() || ch == b'\n');
@@ -271,7 +271,7 @@ impl<'a> Malo<'a> {
                 break;
             }
             if tape.cur().is_none() {
-                return Err(MaloError::MissingCloser { open: b'{', close: b'}', open_pos: tape.pos });
+                return Err(ObjectError::MissingCloser { open: b'{', close: b'}', open_pos: tape.pos });
             }
             let val = self.parse_any(tape)?;
             items.push(val);
@@ -279,10 +279,10 @@ impl<'a> Malo<'a> {
             if tape.cur() == Some(b',') {
                 tape.adv();
             } else if tape.cur() != Some(b'}') {
-                return Err(MaloError::IllegalCharacter { ch: tape.cur().unwrap_or(0), pos: tape.pos });
+                return Err(ObjectError::IllegalCharacter { ch: tape.cur().unwrap_or(0), pos: tape.pos });
             }
         }
-        Ok(MaloValue::List(items))
+        Ok(ObjectValue::List(items))
     }
 }
 
@@ -293,29 +293,29 @@ mod tests {
     #[test]
     fn parse_sample_config() {
         let content = b".{\n    my-paragraph =\n        | this is\n        | a type of\n        | multiline string\n        ,\n    finance-mode = true,\n}// Trailing Commas (The RSI Savior)\n";
-        let parsed = Malo::new(content).compile().expect("parse config.mgon");
+        let parsed = ObjectFile::new(content).compile().expect("parse config.mgon");
 
         let mut expected = HashMap::new();
         expected.insert(
             "my-paragraph".to_string(),
-            MaloValue::String("this is\na type of\nmultiline string".to_string()),
+            ObjectValue::String("this is\na type of\nmultiline string".to_string()),
         );
-        expected.insert("finance-mode".to_string(), MaloValue::Bool(true));
+        expected.insert("finance-mode".to_string(), ObjectValue::Bool(true));
 
-        assert_eq!(parsed, MaloValue::Object(expected));
+        assert_eq!(parsed, ObjectValue::Object(expected));
     }
 
     #[test]
     fn parse_object_with_numbers_and_strings() {
         let content = b"{ count = 42, pi = 3.14, name = 'mgon', active = false }";
-        let parsed = Malo::new(content).compile().expect("parse mgon object");
+        let parsed = ObjectFile::new(content).compile().expect("parse mgon object");
 
         let mut expected = HashMap::new();
-        expected.insert("count".into(), MaloValue::Number(42.0));
-        expected.insert("pi".into(), MaloValue::Number(3.14));
-        expected.insert("name".into(), MaloValue::String("mgon".into()));
-        expected.insert("active".into(), MaloValue::Bool(false));
+        expected.insert("count".into(), ObjectValue::Number(42.0));
+        expected.insert("pi".into(), ObjectValue::Number(3.14));
+        expected.insert("name".into(), ObjectValue::String("mgon".into()));
+        expected.insert("active".into(), ObjectValue::Bool(false));
 
-        assert_eq!(parsed, MaloValue::Object(expected));
+        assert_eq!(parsed, ObjectValue::Object(expected));
     }
 }

@@ -1,8 +1,8 @@
 [package]
-name = "malgam-editor"
+name = "draft-lsp"
 version = "0.1.0"
 edition = "2024"
 authors = ["Angel Eckardt <eckardt.angel7@outlook.com>"]
 license = "AGPL-3.0-only"
-homepage = "https://github.com/aeckar/malgam"
-repository = "https://github.com/aeckar/malgam"
+homepage = "https://github.com/aeckar/draft"
+repository = "https://github.com/aeckar/draft"

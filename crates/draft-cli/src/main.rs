@@ -1,12 +1,13 @@
+//! CAUTION: AI-generated code
 use anyhow::{Context, Result};
 use clap::Parser;
-use malgam_core::mal::{Malgam, MalgamConf};
+use draft_core::markup::{MarkupFile, DynConf};
 use std::{path::PathBuf};
 
 #[derive(Parser, Debug)]
-#[command(name = "mgc")]
+#[command(name = "draft")]
 #[command(version = "0.1.0")]
-#[command(about = "Malgam (mgc): High-performance programmable markup compiler.", long_about = None)]
+#[command(about = "draft: High-performance programmable markup compiler.", long_about = None)]
 struct Args {
     /// The input file or directory to compile.
     /// Defaults to the current directory if not provided.
@@ -64,6 +65,6 @@ fn serve() {
 // since using relatively small files, copy entire file to memory
 
 fn build(input: PathBuf) -> Result<()> {
-    let markup = Malgam::new(MalgamConf(), mgc_conf, input);
+    let markup = MarkupFile::new(DynConf(), mgc_conf, input);
     Ok(())
 }
