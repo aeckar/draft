@@ -4,6 +4,7 @@ use std::collections::HashSet;
 
 use simdutf8::basic::{self, Utf8Error};
 
+use crate::ast::Ast;
 use crate::compile::Compile;
 use crate::ext::{CharExt, SliceExt};
 use crate::tape::Tape;
@@ -38,8 +39,14 @@ pub struct StaticConf {
     trusted_mode: bool,
 }   // todo change to bitfield
 
+#[derive(Error, Debug)]
+pub enum MarkupError {
+    #[error("Invalid UTF-8")]
+    InvalidUtf8(#[from] Utf8Error),
+}
+
 /// Encapsulates mutable state shared between different handlers during Pass 1.
-struct FirstPassCtx<'a> {
+struct FirstPass<'a> {
     /// Virtual (non-plaintext) tokens.
     tokens: Vec<Token<'a>>,
 
@@ -74,7 +81,7 @@ struct FirstPassCtx<'a> {
     fmt_pairs: Vec<(usize, usize)>,
 }
 
-impl<'a> FirstPassCtx<'a> {
+impl<'a> FirstPass<'a> {
     /// Pushes the token nside the input between the start and end indices.
     /// The end index is exclusive.   
     #[inline]
@@ -520,22 +527,12 @@ impl<'a> FirstPassCtx<'a> {
     }
 }
 
-struct MarkupOutput;//todo
-
-#[derive(Error, Debug)]
-pub enum MarkupError {
-    #[error("Invalid UTF-8")]
-    InvalidUtf8(#[from] Utf8Error),
-}
-
 /// Draft markup syntax.
 /// 
 /// todo explain compilation process
 /// todo use mutable state instead of return type for simplicity
 #[derive(Debug)]
 pub struct MarkupFile<'a> {
-    compiled: bool,
-
     /// The input text.
     pub input: &'a [u8],
 
@@ -547,56 +544,39 @@ pub struct MarkupFile<'a> {
 }
 
 impl<'a> Compile for MarkupFile<'a> {
-    type Output = Result<, MarkupError>;
+    type Output = Result<Ast<'a>, MarkupError>;
 
-    fn compile(&mut self) -> Self::Output {
-        if self.compiled {
-            return Ok(());
-        }
+    fn compile(self) -> Self::Output {
         self.validate_utf8()?;
         let tokens = self.parse_virtual_tokens();
         let tokens = self.prune_bad_tokens(tokens);
         let tokens = self.parse_text_tokens(tokens);
         let ast = self.assemble_ast(tokens);
-        let output = self.assemble_html(ast);
-        // todo hook-in sanitization?
-        self.compiled = true;
-        Ok(())
-    }
-
-    fn is_compiled(&self) -> bool {
-        self.compiled
+        Ok(ast)
     }
 }
 
 impl<'a> MarkupFile<'a> {
     pub fn new(dyn_conf: &'a DynConf, static_conf: &'a StaticConf, input: &'a [u8]) -> Self {
         Self {
-            compiled: false,
             input,
             dyn_conf,
             static_conf,
         }
     }
 
-    // ########################################## PASS 1 ##########################################
-
-    /// **PASS 1: VALIDATE UTF-8**
+    /// **Pass 1: VALIDATE UTF-8**
     /// 
     /// Returns true if the input is valid UTF-8, or false otherwise.
-    fn validate_utf8(&mut self) -> Result<(),MarkupError> {
+    #[must_use]
+    fn validate_utf8(&self) -> Result<(),MarkupError> {
         basic::from_utf8(self.input)?;
         Ok(())
     } 
 
-    // ########################################## PASS 2 ##########################################
-
-    /// **PASS 2: PARSE VIRTUAL TOKENS**
-    ///
-    /// todo
     #[must_use]
-    fn parse_virtual_tokens(&mut self) -> Vec<Token<'a>> {
-        let mut pass = FirstPassCtx {
+    fn parse_virtual_tokens(&self) -> Vec<Token<'a>> {
+        let mut pass = FirstPass {
             in_alt_txt: false,
             pgraph_spacing: 2,
             tokens: vec![],
@@ -651,9 +631,7 @@ impl<'a> MarkupFile<'a> {
         pass.tokens
     }
 
-    // ########################################## PASS 3 ##########################################
-
-    /// **PASS 3: PRUNE VIRTUAL TOKENS**
+    /// **Pass 3: PRUNE VIRTUAL TOKENS**
     /// 
     /// Prunes logical virtual tokens after pass one so they can be parsed as plain text
     ///
@@ -666,7 +644,8 @@ impl<'a> MarkupFile<'a> {
     /// emits visible text or not, let's just assume they all do when pruning virtual tokens.
     /// 
     /// The remaining tokens sorted as they appear in the input.
-    fn prune_bad_tokens(&mut self, mut tokens: Vec<Token<'a>>) -> Vec<Token<'a>> {
+    #[must_use]
+    fn prune_bad_tokens(&self, mut tokens: Vec<Token<'a>>) -> Vec<Token<'a>> {
         if tokens.is_empty() { return vec![]; }
         let mut to_prune = HashSet::new();
         let mut last_marker_idx: Option<usize> = None;
@@ -705,12 +684,8 @@ impl<'a> MarkupFile<'a> {
         tokens
     }
 
-    // ########################################## PASS 4 ##########################################
-
-    /// **PASS 4: PARSE PLAINTEXT TOKENS**
-    ///
-    /// todo
-    fn parse_text_tokens(&mut self, mut tokens: Vec<Token<'a>>) -> Vec<Token<'a>> {
+    #[must_use]
+    fn parse_text_tokens(&self, mut tokens: Vec<Token<'a>>) -> Vec<Token<'a>> {
         //here, we have all the meaningful virtual tokens found
         // I don't know what to do with the pair heap yet.
         // However, just iterate over it. Match the position to the next one in the virtual tokens.
@@ -723,7 +698,7 @@ impl<'a> MarkupFile<'a> {
             let next = &tokens[read];
             if next.start == pos {
                 if pos - txt_start != 0 {
-                    pass.emit(TokenType::Plaintext, txt_start, pos);
+                    tokens.push(Token::new(TokenType::Plaintext, txt_start, pos));
                 }
                 read += 1;
                 pos += next.len();
@@ -732,24 +707,12 @@ impl<'a> MarkupFile<'a> {
                 pos += 1;
             }
         }
+        tokens
     }
 
-    // ########################################## PASS 5 ##########################################
-
-    /// **PASS 5: CONSTRUCT AST**
-    ///
-    /// todo
-    fn assemble_ast(&mut self, mut tokens: Vec<Token<'a>>) -> Ast<'a> {
+    #[must_use]
+    fn assemble_ast(&self, mut tokens: Vec<Token<'a>>) -> Ast<'a> {
         self.tokens
-    }
-
-    // ########################################## PASS 6 ##########################################
-
-    /// **PASS 6: EMIT HTML**
-    ///
-    /// todo
-    fn assemble_html(&mut self, ast: Ast<'a>) -> String {
-        
     }
 }
 

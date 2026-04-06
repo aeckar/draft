@@ -132,38 +132,24 @@ pub enum ObjectError {
 pub struct ObjectFile<'a> {
     /// The input text.
     pub input: &'a [u8],
-
-    compiled: bool,
-    value: Result<ObjectValue, ObjectError>,
 }
 
 impl<'a> Compile for ObjectFile<'a> {
     type Output = Result<ObjectValue, ObjectError>;
 
-    fn compile(&mut self) -> Self::Output {
-        if self.compiled {
-            return self.value.clone();
-        }
-        let val = self.parse_any(&mut Tape::new(self.input));
-        self.compiled = true;
-        val
-    }
-
-    fn is_compiled(&self) -> bool {
-        self.compiled
+    fn compile(self) -> Self::Output {
+        self.parse_any(&mut Tape::new(self.input))
     }
 }
 
 impl<'a> ObjectFile<'a> {
     pub fn new(input: &'a str) -> Self {
         Self {
-            input: input.as_bytes(),
-            compiled: false,
-            value: Ok(ObjectValue::Null),
+            input: input.as_bytes()
         }
     }
 
-    fn parse_any(&mut self, tape: &mut Tape<'a>) -> Result<ObjectValue, ObjectError> {
+    fn parse_any(&self, tape: &mut Tape<'a>) -> Result<ObjectValue, ObjectError> {
         let start = tape.pos;
 
         // trivial cases
@@ -210,7 +196,7 @@ impl<'a> ObjectFile<'a> {
         }
     }
 
-    fn parse_obj(&mut self, tape: &mut Tape<'a>) -> Result<ObjectValue, ObjectError> {
+    fn parse_obj(&self, tape: &mut Tape<'a>) -> Result<ObjectValue, ObjectError> {
         tape.adv(); // skip '.'
         if tape.cur() != Some(b'{') {   // should not be checked beforehand
             return Err(ObjectError::IllegalCharacter { ch: tape.cur().unwrap_or(0), pos: tape.pos });
@@ -267,7 +253,7 @@ impl<'a> ObjectFile<'a> {
         Ok(ObjectValue::Object(map))
     }
 
-    fn parse_list(&mut self, tape: &mut Tape<'a>) -> Result<ObjectValue, ObjectError> {
+    fn parse_list(&self, tape: &mut Tape<'a>) -> Result<ObjectValue, ObjectError> {
         let mut items = vec![];
         loop {
             tape.consume(|ch,_| ch.is_file_ws() || ch == b'\n');

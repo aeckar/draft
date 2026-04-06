@@ -5,3 +5,4 @@ pub mod macros;
 pub mod object;
 pub mod compile;
 pub mod ext;
+pub mod ast;
