@@ -1,5 +1,7 @@
 //! Don't check for UTF-8 correctness; leave that to the user.
 
+use simdutf8::basic;
+
 use crate::compile::Compile;
 use crate::ext::{CharExt, SliceExt};
 use crate::tape::Tape;
@@ -138,7 +140,7 @@ impl<'a> MarkupFile<'a> {
     /// 
     /// Returns true if the input is valid UTF-8, or false otherwise.
     fn validate_utf8(&mut self) -> bool {
-
+        basic::from_utf8(self.input)
     } 
 
     // ########################################## PASS 2 ##########################################
@@ -265,7 +267,7 @@ impl<'a> MarkupFile<'a> {
         while let Some(&ch) = self.input.get(tape.pos) {
             let jump: Option<Tape<'a>> = match ch {
                 // ordered by expected frequency
-                b'\n' => {
+                '\n' => {
                     pass.pgraph_spacing = 2;
                     self.emit_cur(tape, TokenType::Newline, 1);
                     // Returning a positive result even though the cursor hasn't moved
@@ -274,21 +276,21 @@ impl<'a> MarkupFile<'a> {
                     // It's more important to maintain semantics.
                     Some(tape)
                 }
-                b'`' => self.handle_btick(&pass, tape),
-                b'$' => self.handle_dollar(&pass, tape),
-                b'-' => self.handle_dash(&mut pass, tape),
-                b'.' => self.handle_dot(&mut pass, tape),
-                b'*' => self.handle_star(&mut pass, tape),
-                b'_' => self.try_pair_cur(&mut pass, tape, InlineFormat::UNDERLINE_FLAG),
-                b'|' => self.try_pair_cur(&mut pass, tape, InlineFormat::HIGHLIGHT_FLAG),
-                b'~' => self.try_pair_cur(&mut pass, tape, InlineFormat::STRIKETHROUGH_FLAG),
-                b'[' => self.handle_obrac(&mut pass, tape),
-                b']' => self.handle_cbrac(&pass, tape),
-                b'=' => self.handle_equals(&mut pass, tape),
-                b'"' | b'\'' => self.handle_quote(&mut pass, tape, tape[tape.pos]),
-                b'\\' => self.handle_bslash(tape),
-                b';' => {   // divider comment ';;' handled by editor
-                    tape.seek_ch(b'\n');
+                '`' => self.handle_btick(&pass, tape),
+                '$' => self.handle_dollar(&pass, tape),
+                '-' => self.handle_dash(&mut pass, tape),
+                '.' => self.handle_dot(&mut pass, tape),
+                '*' => self.handle_star(&mut pass, tape),
+                '_' => self.try_pair_cur(&mut pass, tape, InlineFormat::UNDERLINE_FLAG),
+                '|' => self.try_pair_cur(&mut pass, tape, InlineFormat::HIGHLIGHT_FLAG),
+                '~' => self.try_pair_cur(&mut pass, tape, InlineFormat::STRIKETHROUGH_FLAG),
+                '[' => self.handle_obrac(&mut pass, tape),
+                ']' => self.handle_cbrac(&pass, tape),
+                '=' => self.handle_equals(&mut pass, tape),
+                '"' | '\'' => self.handle_quote(&mut pass, tape, tape[tape.pos]),
+                '\\' => self.handle_bslash(tape),
+                ';' => {   // divider comment ';;' handled by editor
+                    tape.seek_ch('\n');
                     Some(tape)
                 }
                 _ => None,
@@ -319,10 +321,10 @@ impl<'a> MarkupFile<'a> {
                 return None;
             }
             tape.pos += 3; // skip over `"""` 
-            let label = unsafe { String::from_utf8_unchecked(tape.consume(|ch, _| ch != b'\n').trim_hg_ws().to_vec()) };
+            let label = unsafe { String::from_utf8_unchecked(tape.consume(|ch, _| ch != '\n').trim_file_ws().to_vec()) };
 
             if label.is_empty() {
-                if let Some(&(double,pos, )) = pass.open_quotes.last() && double == (ty == b'"') {
+                if let Some(&(double,pos, )) = pass.open_quotes.last() && double == (ty == '"') {
                     self.emit(TokenType::BlockQuoteOpen { label })
                     self.emit(
                         TokenType::BlockQuoteClose,
@@ -335,7 +337,7 @@ impl<'a> MarkupFile<'a> {
             }
             self.emit(
                 TokenType::BlockQuoteOpen {
-                    label: label.trim_hg_ws(),
+                    label: label.trim(),
                 },
                 start,
                 tape.pos,
@@ -353,9 +355,9 @@ impl<'a> MarkupFile<'a> {
         }
         tape.poll_in_pgraph(pass.pgraph_spacing, |ch, pos| {
             let next = tape[pos + 1];
-            ch == b']' && (next == b'(' || next == b'[')
+            ch == ']' && (next == '(' || next == '[')
         })?;
-        if tape.peek_back() == Some(b'!') {
+        if tape.peek_back() == Some('!') {
             self.emit(TokenType::EmbedMarker, tape.pos - 1, tape.pos + 1);
         } else {
             self.emit_cur(tape, TokenType::LinkMarker, 1);
@@ -375,8 +377,8 @@ impl<'a> MarkupFile<'a> {
         let start = tape.pos;
         tape.adv(); // skip ']'
         match tape.cur() {
-            Some(b'[') => stop = b']',
-            Some(b'(') => stop = b')',
+            Some('[') => stop = ']',
+            Some('(') => stop = ')',
             _ => {
                 return None;
             }
@@ -385,7 +387,7 @@ impl<'a> MarkupFile<'a> {
         if body.is_empty() || tape.cur() != Some(stop) {
             return None;
         }
-        if stop == b']' {
+        if stop == ']' {
             self.emit(
                 TokenType::LinkAliasBody { alias: body },
                 start,
@@ -432,7 +434,7 @@ impl<'a> MarkupFile<'a> {
     /// a checkbox, a horizontal rule, or plain text.
     #[must_use]
     fn handle_dash(&mut self, pass: &mut FirstPassCtx, mut tape: Tape<'a>) -> Option<Tape<'a>> {
-        if matches!(tape.peek_back(), Some(b'o') | Some(b'x') | Some(b'?')) {
+        if matches!(tape.peek_back(), Some('o') | Some('x') | Some('?')) {
             // checkbox
             tape.dec(); // decrement to enable check on line start
             if !tape.is_cur_prefix() {
@@ -453,10 +455,10 @@ impl<'a> MarkupFile<'a> {
         if !tape.is_cur_prefix() {
             return None;
         }
-        if tape.is_at(b"--") {
+        if tape.is_at("--") {
             tape.pos += 2;
-            let tail = tape.consume(|ch, _| ch != b'\n');
-            if tail.iter().all(|ch| ch.is_hg_ws()) {
+            let tail = tape.consume(|ch, _| ch != '\n');
+            if tail.iter().all(|ch| ch.is_file_ws()) {
                 self.emit_cur(tape, TokenType::HorizontalRule, 3);
                 tape.dec();
                 return Some(tape); // stop at last '-'
@@ -480,7 +482,7 @@ impl<'a> MarkupFile<'a> {
             return None;
         }
         let start = tape.pos;
-        let marker = tape.consume_in_pgraph(1, |ch, _| ch == b'=');
+        let marker = tape.consume_in_pgraph(1, |ch, _| ch == '=');
         let depth = marker.len();
         if depth > TokenType::HEADING_MAX {
             return Some(tape); // treat as text, but skip next few '='
@@ -496,13 +498,13 @@ impl<'a> MarkupFile<'a> {
     #[must_use]
     fn handle_dollar(&mut self, pass: &FirstPassCtx, mut tape: Tape<'a>) -> Option<Tape<'a>> {
         let start = tape.pos;
-        if tape.is_at(b"$$") {
+        if tape.is_at("$$") {
             if !tape.is_cur_prefix() {
                 return None;
             }
             tape.pos += 2; // skip over '$$'
             let body_start = tape.pos + 1;
-            if !tape.seek_ch3(b'\n', b'$', b'$') {
+            if !tape.seek_ch3('\n', '$', '$') {
                 // failed lookahead
                 return None;
             }
@@ -519,7 +521,7 @@ impl<'a> MarkupFile<'a> {
         if self.static_conf.finance_mode {
             return None;
         }
-        if !tape.seek_ch_in_pgraph(pass.pgraph_spacing, b'$') {
+        if !tape.seek_ch_in_pgraph(pass.pgraph_spacing, '$') {
             // failed lookahead
             return None; // stop at '$'
         }
@@ -538,21 +540,21 @@ impl<'a> MarkupFile<'a> {
     fn handle_btick(&mut self, pass: &FirstPassCtx, mut tape: Tape<'a>) -> Option<Tape<'a>> {
         let start = tape.pos;
         let spacing = pass.pgraph_spacing;
-        if tape.is_at(b"```") {
+        if tape.is_at("```") {
             if !tape.is_cur_prefix() {
                 return None;
             }
             tape.pos += 3; // skip over '```'
-            let lang = tape.consume(|ch, _| ch != b'\n');
+            let lang = tape.consume(|ch, _| ch != '\n');
             let body_start = tape.pos + 1;
-            if !tape.seek_at(b"\n```") {
+            if !tape.seek_at("\n```") {
                 // failed lookahead
                 return None;
             }
             self.emit(
                 TokenType::CodeBlock {
                     body: &tape.slice(body_start..tape.pos),
-                    lang: lang.trim_hg_ws(),
+                    lang: lang.trim_file_ws(),
                 },
                 start,
                 tape.pos + 1,
@@ -560,9 +562,9 @@ impl<'a> MarkupFile<'a> {
             tape.pos += 3; // stop at last '`'
             return Some(tape);
         }
-        if tape.is_at(b"``") {
+        if tape.is_at("``") {
             tape.adv(); // skip over first '`' of open
-            if !tape.seek_at_in_pgraph(spacing, b"``") {
+            if !tape.seek_at_in_pgraph(spacing, "``") {
                 return Some(tape); // stop at 2nd '`'; treat as text
             }
             tape.adv(); // skip over first '`' of closer
@@ -575,7 +577,7 @@ impl<'a> MarkupFile<'a> {
             );
             return Some(tape);
         }
-        if !tape.seek_ch_in_pgraph(spacing, b'`') {
+        if !tape.seek_ch_in_pgraph(spacing, '`') {
             // failed lookahead
             return None; // stop at '`'
         }
@@ -593,13 +595,13 @@ impl<'a> MarkupFile<'a> {
     /// an italic token, both, or plain text.
     #[must_use]
     fn handle_star(&mut self, pass: &mut FirstPassCtx, tape: Tape<'a>) -> Option<Tape<'a>> {
-        if tape.is_at(b"***") {
+        if tape.is_at("***") {
             self.try_pair_cur(
                 pass,
                 tape,
                 InlineFormat::BOLD_FLAG | InlineFormat::ITALIC_FLAG,
             )
-        } else if tape.is_at(b"**") {
+        } else if tape.is_at("**") {
             self.try_pair_cur(pass, tape, InlineFormat::BOLD_FLAG)
         } else {
             // try for '*'
@@ -623,7 +625,7 @@ impl<'a> MarkupFile<'a> {
         }
         let mut next_pos = tape.pos;
         let mut next = tape.cur();
-        if next.is_none_or(|ch| ch != b'[' && ch != b'{') {
+        if next.is_none_or(|ch| ch != '[' && ch != '{') {
             // treat as incomplete macro
             return Some(tape); // stop at the first non-WS character after the macro name
         }
@@ -632,8 +634,8 @@ impl<'a> MarkupFile<'a> {
             start,
             start + name.len() + 1,
         ));
-        if next == Some(b'[') {
-            if !tape.seek_ch(b']') {
+        if next == Some('[') {
+            if !tape.seek_ch(']') {
                 // treat as incomplete macro
                 return Some(tape); // stop at '['
             }
@@ -649,8 +651,8 @@ impl<'a> MarkupFile<'a> {
             next = tape.cur();
             // stop after ']'
         }
-        while next == Some(b'{') {
-            if !tape.seek_ch(b'}') {
+        while next == Some('{') {
+            if !tape.seek_ch('}') {
                 // treat as incomplete macro
                 return Some(tape); // stop at '{'
             }

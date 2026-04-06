@@ -1,13 +1,13 @@
-const IS_HG_WS: u8 = 1 << 0; // 0000_0001
-const IS_HGON_KEY_PART: u8 = 1 << 1;    // 0000_0010
+const IS_FILE_WS: u8 = 1 << 0; // 0000_0001
+const IS_KEY_PART: u8 = 1 << 1;    // 0000_0010
 const FLAG_BITS: u8 = 2;
 
 /// Exactly 256 bytes—one for every possible u8 value.
 const CHAR_TABLE: [u8; 256] = {
     let mut table = [0u8; 256];
-    table[b' ' as usize] = IS_HG_WS | (1 << FLAG_BITS);
-    table[b'\t' as usize] = IS_HG_WS | (4 << FLAG_BITS);
-    table[b'\r' as usize] = IS_HG_WS | (1 << FLAG_BITS);
+    table[b' ' as usize] = IS_FILE_WS | (1 << FLAG_BITS);
+    table[b'\t' as usize] = IS_FILE_WS | (4 << FLAG_BITS);
+    table[b'\r' as usize] = IS_FILE_WS | (1 << FLAG_BITS);
     
     let bytes = concat!(
         "abcdefghijklmnopqrstuvwxyz",
@@ -17,7 +17,7 @@ const CHAR_TABLE: [u8; 256] = {
     ).as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        table[bytes[i] as usize] = IS_HGON_KEY_PART;
+        table[bytes[i] as usize] = IS_KEY_PART;
         i += 1;
     }
     table
@@ -31,37 +31,37 @@ pub trait CharExt {
     /// (like `*` for bold/italic) should be treated as text or as formatting markers,
     /// based on their surrounding context.
     /// 
-    /// Recognition of these whitespace characters extends to HGON also.
+    /// Recognition of these whitespace characters extends to object notation also.
     #[must_use]
-    fn is_hg_ws(&self) -> bool;
+    fn is_file_ws(&self) -> bool;
 
     /// Returns the length of the given flanking whitespace character,
     /// where a tab counts as 4 spaces and space counts as 1.
     ///
     /// All other characters return a length of 0.
     #[must_use]
-    fn hg_ws_len(&self) -> u8;
+    fn file_ws_len(&self) -> u8;
 
     /// Returns true if this character may be part of an unescaped (without `""`) key
-    /// in an HGON object.
+    /// in object notation.
     /// 
     /// Letters, digits, dashes, underscores, dots, and dollar signs are accepted.
-    fn is_hgon_key_part(&self) -> bool;
+    fn is_file_key_part(&self) -> bool;
 }
 
 impl CharExt for u8 {
     #[inline(always)]
-    fn is_hgon_key_part(&self) -> bool {
-        (CHAR_TABLE[*self as usize] & IS_HGON_KEY_PART) != 0
+    fn is_file_key_part(&self) -> bool {
+        (CHAR_TABLE[*self as usize] & IS_KEY_PART) != 0
     }
 
     #[inline(always)]
-    fn is_hg_ws(&self) -> bool {
-        (CHAR_TABLE[*self as usize] & IS_HG_WS) != 0
+    fn is_file_ws(&self) -> bool {
+        (CHAR_TABLE[*self as usize] & IS_FILE_WS) != 0
     }
 
     #[inline(always)]
-    fn hg_ws_len(&self) -> u8 {
+    fn file_ws_len(&self) -> u8 {
         // Shift the stored length value back down
         CHAR_TABLE[*self as usize] >> FLAG_BITS
     }
@@ -69,35 +69,21 @@ impl CharExt for u8 {
 
 pub trait SliceExt {
     /// Returns a subslice with leading and trailing flanking white space removed.
-    fn trim_hg_ws(&self) -> Self;
-
-    /// Returns the UTF-8 String form of this slice.
-    /// 
-    /// Because we assume UTF-8 compatibility
-    fn as_utf8(&self) -> String;
+    fn trim_file_ws(&self) -> Self;
 }
 
-impl SliceExt for &[u8] {
+impl SliceExt for &str {
     #[inline(always)]
-    fn trim_hg_ws(&self) -> Self {
-        let mut bytes = *self;
-        while let [first, rest @ ..] = bytes {
-            // peel off front
-            if first.is_hg_ws() {
-                bytes = rest;
-            } else {
-                break;
-            }
+    fn trim_file_ws(&self) -> Self {
+        let bytes = self.as_bytes();
+        let mut start = 0;
+        let mut end = bytes.len();
+        while start < end && bytes[start].is_file_ws() {
+            start += 1;
         }
-        while let [rest @ .., last] = bytes {
-            // peel off back
-            if last.is_hg_ws() {
-                bytes = rest;
-            } else {
-                break;
-            }
+        while start < end && bytes[end - 1].is_file_ws() {
+            end -= 1;
         }
-        bytes
+        &self[start..end]
     }
-    
 }

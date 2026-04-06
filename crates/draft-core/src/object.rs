@@ -109,7 +109,7 @@ impl ObjectValue {
     }
 }
 
-/// Describes and locates a specific error in `hgon` syntax. 
+/// Describes and locates a specific error in object notation syntax. 
 #[derive(Error, Debug, Clone)]
 pub enum ObjectError {
     #[error("Expected a value at index {pos}")]
@@ -212,10 +212,10 @@ impl<'a> ObjectFile<'a> {
         }
         let open_pos = tape.pos;
         tape.adv(); // skip '{'
-        tape.consume(|ch,_| ch.is_hg_ws());
+        tape.consume(|ch,_| ch.is_file_ws());
         let mut map = HashMap::new();
         loop {  // allows leading, trailing, and mixed/chained delimiters
-            tape.consume(|ch,_| ch.is_hg_ws() || ch == b'\n' || ch == b',');
+            tape.consume(|ch,_| ch.is_file_ws() || ch == b'\n' || ch == b',');
 
             // get current character
             let ch = tape.cur();
@@ -243,19 +243,19 @@ impl<'a> ObjectFile<'a> {
                 tape.adv(); // skip `'`
             }
             else {
-                key = tape.consume(|ch, _| ch.is_hgon_key_part());
+                key = tape.consume(|ch, _| ch.is_file_key_part());
             }
             if key.is_empty() {
                 return Err(ObjectError::MissingValue { pos: tape.pos });
             }
             let key = unsafe { str::from_utf8_unchecked(key) }.to_string();
 
-            tape.consume(|ch,_| ch.is_hg_ws());
+            tape.consume(|ch,_| ch.is_file_ws());
             if tape.cur() != Some(b'=') {
                 return Err(ObjectError::IllegalCharacter { ch: tape.cur().unwrap_or(0), pos: tape.pos });
             }
             tape.adv(); // skip '='
-            tape.consume(|ch,_| ch.is_hg_ws());
+            tape.consume(|ch,_| ch.is_file_ws());
             let val = self.parse_any(tape)?;
             map.insert(key, val);
         } 
@@ -265,7 +265,7 @@ impl<'a> ObjectFile<'a> {
     fn parse_list(&mut self, tape: &mut Tape<'a>) -> ObjectResult {
         let mut items = Vec::new();
         loop {
-            tape.consume(|ch,_| ch.is_hg_ws() || ch == b'\n');
+            tape.consume(|ch,_| ch.is_file_ws() || ch == b'\n');
             if tape.cur() == Some(b'}') {
                 tape.adv();
                 break;
@@ -275,7 +275,7 @@ impl<'a> ObjectFile<'a> {
             }
             let val = self.parse_any(tape)?;
             items.push(val);
-            tape.consume(|ch,_| ch.is_hg_ws() || ch == b'\n');
+            tape.consume(|ch,_| ch.is_file_ws() || ch == b'\n');
             if tape.cur() == Some(b',') {
                 tape.adv();
             } else if tape.cur() != Some(b'}') {

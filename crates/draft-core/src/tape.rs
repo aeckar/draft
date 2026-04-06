@@ -8,10 +8,10 @@ use std::ops::{Index,Range};
 /// For optimal performance, the given string should only consist of whitespace characters.
 /// 
 /// This is left private, as users should convert text to `Tape` first.
-fn count_indent(ws: &[u8]) -> u8 {
-let (tabs, spaces) = ws.iter().fold((0, 0), |(t, s), &ch| match ch {
-        b'\t' => (t + 1, s),
-        b' ' => (t, s + 1),
+fn count_indent(ws: &str) -> u8 {
+let (tabs, spaces) = ws.chars().fold((0, 0), |(t, s), ch| match ch {
+        '\t' => (t + 1, s),
+        ' ' => (t, s + 1),
         _ => (t, s),
     });
     tabs + (spaces / 4)
@@ -26,7 +26,7 @@ let (tabs, spaces) = ws.iter().fold((0, 0), |(t, s), &ch| match ch {
 ///   and random access via slicing, which is essential for multi-character 
 ///   delimiters and lookbehind checks.
 /// * **Zero-Copy Slicing:** Because it retains a reference to the `raw` buffer, 
-///   methods like `consume` can return efficient `&[u8]` sub-slices without 
+///   methods like `consume` can return efficient `&str` sub-slices without 
 ///   allocating new memory.
 /// * **State Snapshots:** Since `Tape` is `Copy`, it can be cheaply duplicated 
 ///   to "try" a parsing branch and then discarded if the branch fails, 
@@ -37,12 +37,12 @@ let (tabs, spaces) = ws.iter().fold((0, 0), |(t, s), &ch| match ch {
 /// but member functions assume so.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Tape<'a> {
-    pub raw: &'a [u8],
+    pub raw: &'a str,
     pub pos: usize,
 }
 
 impl<'a> Index<usize> for Tape<'a> {
-    type Output = u8;
+    type Output = char;
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.raw[index]
@@ -50,7 +50,7 @@ impl<'a> Index<usize> for Tape<'a> {
 }
 
 impl<'a> Iterator for Tape<'a> {
-    type Item = u8;
+    type Item = char;
 
     fn next(&mut self) -> Option<Self::Item> {
         let ch = *self.raw.get(self.pos)?;
@@ -60,12 +60,8 @@ impl<'a> Iterator for Tape<'a> {
 }
 
 impl<'a> Tape<'a> {
-    pub fn new(raw: &'a [u8]) -> Self {
+    pub fn new(raw: &'a str) -> Self {
         Self { raw, pos: 0 }
-    }
-
-    pub unsafe fn to_uf8_unchecked(&self) -> &'a str {
-        unsafe { str::from_utf8_unchecked(&self.raw[self.pos..]) }
     }
 
     /// Returns the **current** character, if exists, before incrementing the current position.
@@ -94,7 +90,7 @@ impl<'a> Tape<'a> {
     /// Returns the current character, or `None` if `pos` is out of bounds.
     #[must_use]
     #[inline(always)]
-    pub const fn cur(&self) -> Option<u8> {
+    pub const fn cur(&self) -> Option<char> {
         if self.pos < self.raw.len() {
             Some(self.raw[self.pos])
         } else {
@@ -105,7 +101,7 @@ impl<'a> Tape<'a> {
     /// Returns the character at `pos + 1`, or `None` if that position is out of bounds.
     #[must_use]
     #[inline(always)]
-    pub const fn peek(&self) -> Option<u8> {
+    pub const fn peek(&self) -> Option<char> {
         let pos = self.pos + 1;
         if pos < self.raw.len() {
             Some(self.raw[pos])
@@ -117,7 +113,7 @@ impl<'a> Tape<'a> {
     /// Returns the character at `pos - 1`, or `None` if that position is out of bounds.
     #[must_use]
     #[inline(always)]
-    pub const fn peek_back(&self) -> Option<u8> {
+    pub const fn peek_back(&self) -> Option<char> {
         let pos = self.pos - 1;
         if pos < self.raw.len() {
             Some(self.raw[pos])
@@ -130,14 +126,14 @@ impl<'a> Tape<'a> {
     #[must_use]
     #[inline]
     pub fn is_l_clear(&self, pos: usize) -> bool {
-        pos == 0 || self.raw.get(pos - 1).is_none_or(|ch| ch.is_hg_ws())
+        pos == 0 || self.raw.get(pos - 1).is_none_or(|ch| ch.is_file_ws())
     }
 
     /// Returns true if the character at the given position has clearance on its right side.
     #[must_use]
     #[inline]
     pub fn is_r_clear(&self, pos: usize) -> bool {
-        self.raw.get(pos + 1).is_none_or(|ch| ch.is_hg_ws())
+        self.raw.get(pos + 1).is_none_or(|ch| ch.is_file_ws())
     }
 
     /// Returns true if the character cluster whose last character is at
@@ -182,7 +178,7 @@ impl<'a> Tape<'a> {
         let text = self.raw;
         let mut nl_count = 0;
         for (i, &ch) in text.iter().enumerate() {
-            if ch == b'\n' {
+            if ch == '\n' {
                 nl_count += 1;
                 if nl_count >= spacing {
                     return None;
@@ -198,7 +194,7 @@ impl<'a> Tape<'a> {
     }
 
     #[inline]
-    pub fn slice(&self, range: Range<usize>) -> &'a [u8] {
+    pub fn slice(&self, range: Range<usize>) -> &'a str {
         &self.raw[range]
     }
 
@@ -208,7 +204,7 @@ impl<'a> Tape<'a> {
     /// Leaves `pos` pointing at the matching character (or at `text.len()` when none matched).
     /// Returns the subslice iterated over.
     #[inline]
-    pub fn consume<F>(&mut self, mut pred: F) -> &'a [u8]
+    pub fn consume<F>(&mut self, mut pred: F) -> &'a str
     where
         F: FnMut(u8, usize) -> bool,
     {
@@ -228,7 +224,7 @@ impl<'a> Tape<'a> {
     /// Leaves `pos` pointing at the matching character (or at `text.len()` when none matched).
     /// Returns the subslice iterated over.
     #[inline]
-    pub fn put_back<F>(&mut self, mut pred: F) -> &'a [u8]
+    pub fn put_back<F>(&mut self, mut pred: F) -> &'a str
     where
         F: FnMut(u8, usize) -> bool,
     {
@@ -248,7 +244,7 @@ impl<'a> Tape<'a> {
     /// Leaves `pos` pointing at the matching character (or at `text.len()` when none matched).
     /// Returns the subslice iterated over.
     #[inline]
-    pub fn consume_in_pgraph<F>(&mut self, spacing: u8, mut pred: F) -> &'a [u8]
+    pub fn consume_in_pgraph<F>(&mut self, spacing: u8, mut pred: F) -> &'a str
     where
         F: FnMut(u8, usize) -> bool,
     {
@@ -335,7 +331,7 @@ impl<'a> Tape<'a> {
     /// 
     /// Optimized using Two-Way search algorithm.
     #[inline]
-    pub fn seek_at(&mut self, query: &'a [u8]) -> bool {
+    pub fn seek_at(&mut self, query: &'a str) -> bool {
 if let Some(offset) = memmem::find(&self.raw[self.pos..], query) {
             self.pos += offset;
             return true;
@@ -348,7 +344,7 @@ if let Some(offset) = memmem::find(&self.raw[self.pos..], query) {
     /// Returns `true` if found and `pos` is left pointing at the match,
     /// or `false` and `pos` is restored to its original value.
     #[inline]
-    pub fn seek_at_in_pgraph(&mut self, spacing: u8, query: &'a [u8]) -> bool {
+    pub fn seek_at_in_pgraph(&mut self, spacing: u8, query: &'a str) -> bool {
         self.seek_in_pgraph(spacing, |_, pos| self.raw[pos..].starts_with(query))
     }
 
@@ -408,10 +404,10 @@ if let Some(offset) = memmem::find(&self.raw[self.pos..], query) {
     pub fn is_prefix(&self, pos: usize) -> bool {
         for i in (0..pos).rev() {
             let c = self.raw[i]; // This is safe because i < self.pos
-            if c == b'\n' {
+            if c == '\n' {
                 return true;
             }
-            if !c.is_hg_ws() {
+            if !c.is_file_ws() {
                 return false;
             }
         }
@@ -421,6 +417,6 @@ if let Some(offset) = memmem::find(&self.raw[self.pos..], query) {
     /// Returns the number of times the current line is indented.
     #[must_use]
     pub fn count_indent(&self) -> u8 {
-        count_indent(&self.raw[self.poll_back(|ch, _| ch == b'\n').unwrap_or(0)..self.pos])
+        count_indent(&self.raw[self.poll_back(|ch, _| ch == '\n').unwrap_or(0)..self.pos])
     }
 }

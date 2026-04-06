@@ -23,7 +23,7 @@ Unlike in Markdown, these do not need to be followed by a whitespace character t
 
 Though it is recommended to not include a trailing whitespace character, the inclusion of one **will not** break formatting but **will** be trimmed off in the rendered output.
 
-| Draft                | HTML                       | Rendered output          |
+| Draft                 | HTML                       | Rendered output          |
 | --------------------- | -------------------------- | ------------------------ |
 | =Heading level 1      | \<h1>Heading level 1\</h1> | <h1>Heading level 1</h1> |
 | ==Heading level 2     | \<h2>Heading level 2\</h2> | <h2>Heading level 2</h2> |
@@ -36,8 +36,7 @@ If the formatter is run periodically, best practice is to leave headings lowerca
 
 #### **Lists**
 
-Draft supports both unordered and ordered lists. 
-
+Draft supports both unordered and ordered lists.
 
 ### **3. Best Practices**
 
@@ -80,7 +79,7 @@ Malo supports six primary data types, mapped to the `MaloValue` enum:
 
 ### **Object Keys**
 
-- **Unquoted Keys:** Keys that satisfy `is_hgon_key_part()` (alphanumeric, underscores, and dashes) do not require quotes.
+- **Unquoted Keys:** Keys that satisfy `is_file_key_part()` (alphanumeric, underscores, and dashes) do not require quotes.
 - **Quoted Keys:** If a key contains spaces or special characters, it must be quoted. Special characters are any .
 - **Assignment:** Keys are mapped to values using the equals sign (`=`).
 
@@ -92,14 +91,14 @@ Malo supports six primary data types, mapped to the `MaloValue` enum:
 
 ### **The Tape Parser**
 
-HGON uses a `Tape` abstraction for non-destructive reading of the byte stream.
+DON uses a `Tape` abstraction for non-destructive reading of the byte stream.
 
 - **`parse_any`**: The entry point for determining the type of the next token.
-- **`consume`**: Used to skip whitespace (`is_hg_ws`) or collect specific character segments.
+- **`consume`**: Used to skip whitespace (`is_file_ws`) or collect specific character segments.
 
 ### **Formatting & Display**
 
-The `HgonValue` implementation provides two ways to turn data back into strings:
+The `ObjectValue` implementation provides two ways to turn data back into strings:
 
 1.  **Concise (`Display`):** Emits the smallest possible representation (e.g., `.{a:1,b:2,}`). Note that the standard `fmt` implementation uses `:` as a separator, while the parser looks for `=`.
 2.  **Pretty Print (`to_pstring`):** Outputs a human-friendly version with 4-space indentations and quoted keys for clarity.
@@ -129,7 +128,7 @@ The `HgonValue` implementation provides two ways to turn data back into strings:
     description =
         | This is a
         | multiline string
-        | in HGON,
+        | in DON,
 }
 ```
 
@@ -137,7 +136,7 @@ The `HgonValue` implementation provides two ways to turn data back into strings:
 
 ## **5. Error Handling**
 
-The parser returns an `HgonError` which provides the exact byte position (`pos`) of the failure:
+The parser returns an `ObjectError` which provides the exact byte position (`pos`) of the failure:
 
 - **`MissingValue`**: Found an empty space or comment where a value was expected.
 - **`InvalidNumber`**: Failed to parse a string into an `f64`.
