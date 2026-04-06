@@ -2,16 +2,16 @@
 
 This crate contains core utilities used to manipulate Draft markup and object notation. This library is used to:
 
-- Compile markup to a static site (see `mal build`)
+- Compile markup to a static site (see `draft build`)
 - Parse markup and object notation
 - Transform markup to Markdown, and vice-versa
-- Transform Malo to JSON, and vice-versa
+- Transform DON to JSON, and vice-versa
 
-The `mal` program, implemented in the `draft-cli` crate, is mostly a wrapper over this library. It enables idiomatic manipulation of `.mal` and `.malo` files over the command-line, as well as a way for external programs to access the features listed above.
+The `draft` program, implemented in the `draft-cli` crate, is mostly a wrapper over this library. It enables idiomatic manipulation of `.dt` and `.don` files over the command-line, as well as a way for external programs to access the features listed above.
 
 ## The Draft Language
 
-**Draft** is an ergonomic, extensible markup language inspired by Markdown. It is denoted by a `.mal` file extension.
+**Draft** is an ergonomic, extensible markup language inspired by Markdown. It is denoted by a `.draft` file extension.
 
 ### **2. Specification**
 
@@ -32,7 +32,7 @@ Though it is recommended to not include a trailing whitespace character, the inc
 | =====Heading level 5  | \<h5>Heading level 5\</h5> | <h4>Heading level 5</h5> |
 | ======Heading level 6 | \<h6>Heading level 6\</h6> | <h5>Heading level 6</h6> |
 
-If the formatter is run periodically, best practice is to leave headings lowercase. When `mal fmt` is run, the content is spellchecked and put into title case automatically.
+If the formatter is run periodically, best practice is to leave headings lowercase. When `draft fmt` is run, the content is spellchecked and put into title case automatically.
 
 #### **Lists**
 
@@ -40,9 +40,9 @@ Draft supports both unordered and ordered lists.
 
 ### **3. Best Practices**
 
-## Draft Object Notation
+## Draft Object Notation (DON)
 
-**Malo** is an ergonomic, human-readable data serialization format derived from the Draft. It is denoted by a `.malo` file extension.
+**DON** is an ergonomic, human-readable data serialization format derived from the Draft. It is denoted by a `.don` file extension.
 
 While it shares similarities with JSON, it prioritizes ergonomic manual editing through features like flexible string quoting and trailing commas. There also exists a distinct syntax for lists and objects which respects Draft macro syntax when such objects are used as macro arguments.
 
@@ -50,7 +50,7 @@ wrap is handled by alt-z
 
 ### **1. Data Types**
 
-Malo supports six primary data types, mapped to the `MaloValue` enum:
+DON supports six primary data types, mapped to the `ObjectValue` enum:
 
 | Type       | Description                                               | Example              |
 | :--------- | :-------------------------------------------------------- | :------------------- |
@@ -65,13 +65,13 @@ Malo supports six primary data types, mapped to the `MaloValue` enum:
 
 #### **Numbers**
 
-- **Leading Digits:** Unlike some JSON parsers, Malo numbers **must** start with a digit.
+- **Leading Digits:** Unlike some JSON parsers, DON numbers **must** start with a digit.
 - **Special Values:** Supports case-insensitive representations of infinity (`inf`, `+infinity`, `-inf`) and Not-a-Number (`nan`).
 
 #### **Strings**
 
 - **Quotes:** Both single quotes (`'`) and double quotes (`"`) are valid.
-- **Multiline:** Malo supports pipe-prefixed (`|`) multiline strings, which strip the pipe character and preserve newlines. Such strings are terminated by a leading `;` on its own line.
+- **Multiline:** DON supports pipe-prefixed (`|`) multiline strings, which strip the pipe character and preserve newlines. Such strings are terminated by a leading `;` on its own line.
 
 #### **Lists and Objects**
 

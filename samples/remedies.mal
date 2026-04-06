@@ -109,3 +109,6 @@ in editor: use `>` as shorthand for "insert this"
     `>draw<ENTER>` -> embedded, resizable excalidraw frame
     no need to tab out, can click out since user is already holding mouse/stylus
     AI fixes squiggly syntax in macros automagically
+
+
+Updraft is company/app name, Draft is markup/cli name
