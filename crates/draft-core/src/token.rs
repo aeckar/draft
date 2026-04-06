@@ -61,7 +61,7 @@ impl InlineFormat {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum CheckboxType {
-    Filled, Empty, Toggle
+    Filled, Empty, Interactable
 }
 
 impl CheckboxType {

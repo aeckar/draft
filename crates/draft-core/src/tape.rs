@@ -130,14 +130,14 @@ impl<'a> Tape<'a> {
     #[must_use]
     #[inline]
     pub fn is_l_clear(&self, pos: usize) -> bool {
-        pos == 0 || self.raw.get(pos - 1).is_none_or(|ch| ch.is_hg_ws())
+        pos == 0 || self.raw.get(pos - 1).is_none_or(|ch| ch.is_file_ws())
     }
 
     /// Returns true if the character at the given position has clearance on its right side.
     #[must_use]
     #[inline]
     pub fn is_r_clear(&self, pos: usize) -> bool {
-        self.raw.get(pos + 1).is_none_or(|ch| ch.is_hg_ws())
+        self.raw.get(pos + 1).is_none_or(|ch| ch.is_file_ws())
     }
 
     /// Returns true if the character cluster whose last character is at
@@ -411,7 +411,7 @@ if let Some(offset) = memmem::find(&self.raw[self.pos..], query) {
             if c == b'\n' {
                 return true;
             }
-            if !c.is_hg_ws() {
+            if !c.is_file_ws() {
                 return false;
             }
         }

@@ -8,8 +8,6 @@ use crate::compile::Compile;
 use crate::ext::CharExt;
 use crate::tape::Tape;
 
-pub type ObjectResult = Result<ObjectValue, ObjectError>;
-
 /// An instance of an `malo` data type.
 /// 
 /// Roughly reflects JSON data types. Numbers **must** start with a digit.
@@ -131,11 +129,11 @@ pub struct ObjectFile<'a> {
     pub input: &'a [u8],
 
     compiled: bool,
-    value: ObjectResult,
+    value: Self::Output,
 }
 
 impl<'a> Compile for ObjectFile<'a> {
-    type Output = ObjectResult;
+    type Output = Result<ObjectValue, ObjectError>;
 
     fn compile(&mut self) -> Self::Output {
         if self.compiled {
@@ -160,7 +158,7 @@ impl<'a> ObjectFile<'a> {
         }
     }
 
-    fn parse_any(&mut self, tape: &mut Tape<'a>) -> ObjectResult {
+    fn parse_any(&mut self, tape: &mut Tape<'a>) -> Result<ObjectValue, ObjectError> {
         let start = tape.pos;
 
         // trivial cases
@@ -205,7 +203,7 @@ impl<'a> ObjectFile<'a> {
         }
     }
 
-    fn parse_obj(&mut self, tape: &mut Tape<'a>) -> ObjectResult {
+    fn parse_obj(&mut self, tape: &mut Tape<'a>) -> Result<ObjectValue, ObjectError> {
         tape.adv(); // skip '.'
         if tape.cur() != Some(b'{') {   // should not be checked beforehand
             return Err(ObjectError::IllegalCharacter { ch: tape.cur().unwrap_or(0), pos: tape.pos });
@@ -262,7 +260,7 @@ impl<'a> ObjectFile<'a> {
         Ok(ObjectValue::Object(map))
     }
 
-    fn parse_list(&mut self, tape: &mut Tape<'a>) -> ObjectResult {
+    fn parse_list(&mut self, tape: &mut Tape<'a>) -> Result<ObjectValue, ObjectError> {
         let mut items = Vec::new();
         loop {
             tape.consume(|ch,_| ch.is_file_ws() || ch == b'\n');

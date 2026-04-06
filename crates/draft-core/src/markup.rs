@@ -1,11 +1,12 @@
 //! Don't check for UTF-8 correctness; leave that to the user.
 
-use simdutf8::basic;
+use simdutf8::basic::{self, Utf8Error};
 
 use crate::compile::Compile;
 use crate::ext::{CharExt, SliceExt};
 use crate::tape::Tape;
 use crate::token::{CheckboxType, InlineFormat, Numbering, Token, TokenType};
+use thiserror::Error;
 
 /// Dynamic configuration optionsset by the `\file` macro or by `config.mgon`.
 /// 
@@ -67,9 +68,18 @@ struct FirstPassCtx {
     fmt_pairs: Vec<(usize, usize)>,
 }
 
+struct MarkupOutput;//todo
+
+#[derive(Error, Debug)]
+pub enum MarkupError {
+    #[error("Input is not valid UTF-8")]
+    InvalidUtf8(#[from] Utf8Error),
+}
+
 /// Draft markup syntax.
 /// 
 /// todo explain compilation process
+/// todo use mutable state instead of return type for simplicity
 #[derive(Debug)]
 pub struct MarkupFile<'a> {
     ///the tokens are generated in the pre-pass, and
@@ -88,19 +98,18 @@ pub struct MarkupFile<'a> {
     pub static_conf: &'a StaticConf,
 }
 
-struct MarkupOutput;//todo
-
 impl<'a> Compile for MarkupFile<'a> {
-    type Output = ();
+    type Output = Result<(), MarkupError>;
 
-    fn compile(&mut self) {
+    fn compile(&mut self) -> Self::Output {
         if self.compiled {
-            return;
+            return Ok(());
         }
-        let pass1 = self.validate_utf8();
+        self.validate_utf8()?;
         let pass2 = self.parse_virt_tokens();
         let pass3 = self.parse_txt_tokens();
         self.compiled = true;
+        Ok(())
     }
 
     fn is_compiled(&self) -> bool {
@@ -139,8 +148,9 @@ impl<'a> MarkupFile<'a> {
     /// **PASS 1: VALIDATE UTF-8**
     /// 
     /// Returns true if the input is valid UTF-8, or false otherwise.
-    fn validate_utf8(&mut self) -> bool {
-        basic::from_utf8(self.input)
+    fn validate_utf8(&mut self) -> Result<(),MarkupError> {
+        basic::from_utf8(self.input)?;
+        Ok(())
     } 
 
     // ########################################## PASS 2 ##########################################
@@ -321,7 +331,7 @@ impl<'a> MarkupFile<'a> {
                 return None;
             }
             tape.pos += 3; // skip over `"""` 
-            let label = unsafe { String::from_utf8_unchecked(tape.consume(|ch, _| ch != b'\n').trim_file_ws().to_vec()) };
+            let label = tape.consume(|ch, _| ch != b'\n').trim_file_ws();
 
             if label.is_empty() {
                 if let Some(&(double,pos, )) = pass.open_quotes.last() && double == (ty == b'"') {
@@ -642,7 +652,7 @@ impl<'a> MarkupFile<'a> {
             tape.adv(); // skip past ']'
             self.emit(
                 TokenType::MacroArgs {
-                    body: &tape.slice(ext_pos + 1..tape.pos),
+                    body: &tape.slice(next_pos + 1..tape.pos),
                 },
                 next_pos,
                 tape.pos,
@@ -659,7 +669,7 @@ impl<'a> MarkupFile<'a> {
             tape.adv(); // skip past '}'
             self.emit(
                 TokenType::MacroBody {
-                    body: &tape[next_pos + 1..tape.pos],
+                    body: &tape.slice(next_pos + 1..tape.pos),
                 },
                 next_pos,
                 tape.pos,
