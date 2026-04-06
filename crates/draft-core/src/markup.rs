@@ -39,7 +39,10 @@ pub struct StaticConf {
 }   // todo change to bitfield
 
 /// Encapsulates mutable state shared between different handlers during Pass 1.
-struct FirstPassCtx {
+struct FirstPassCtx<'a> {
+    /// Virtual (non-plaintext) tokens.
+    tokens: Vec<Token<'a>>,
+
     /// The number of spaces used to distinguish between two different paragraphs.
     ///
     /// This is 1 between single-line components (such as headings) and any other type of component,
@@ -60,8 +63,9 @@ struct FirstPassCtx {
     /// 
     /// Block quotes can be nested, but the characters used must match.
     /// 
-    /// The first element of eac8h pair is whether double quotes were used.
-    open_quotes: Vec<(bool, usize)>,
+    /// The first element of each pair is whether double quotes were used.
+    /// The second is the label.
+    open_quotes: Vec<(bool, &'a [u8], usize)>,
 
     /// The positions of all format marker pairs currently resolved.
     ///
@@ -70,69 +74,7 @@ struct FirstPassCtx {
     fmt_pairs: Vec<(usize, usize)>,
 }
 
-struct MarkupOutput;//todo
-
-#[derive(Error, Debug)]
-pub enum MarkupError {
-    #[error("Invalid UTF-8")]
-    InvalidUtf8(#[from] Utf8Error),
-}
-
-/// Draft markup syntax.
-/// 
-/// todo explain compilation process
-/// todo use mutable state instead of return type for simplicity
-#[derive(Debug)]
-pub struct MarkupFile<'a> {
-    ///the tokens are generated in the pre-pass, and
-    /// then used in the main pass to generate the output.
-    tokens: Vec<Token<'a>>,
-
-    compiled: bool,
-
-    /// The input text.
-    pub input: &'a [u8],
-
-    /// Dynamic configuration.
-    pub dyn_conf: &'a DynConf,
-
-    /// Static configuration.
-    pub static_conf: &'a StaticConf,
-}
-
-impl<'a> Compile for MarkupFile<'a> {
-    type Output = Result<(), MarkupError>;
-
-    fn compile(&mut self) -> Self::Output {
-        if self.compiled {
-            return Ok(());
-        }
-        self.validate_utf8()?;
-        let pass2 = self.parse_virt_tokens();
-        let pass3 = self.prune_virt_tokens();
-        let pass4 = self.parse_txt_tokens();
-        let pass5 = self.construct_ast();
-        let pass6 = self.generate_output();
-        self.compiled = true;
-        Ok(())
-    }
-
-    fn is_compiled(&self) -> bool {
-        self.compiled
-    }
-}
-
-impl<'a> MarkupFile<'a> {
-    pub fn new(conf: &'a DynConf, mgc_conf: &'a StaticConf, input: &'a [u8]) -> Self {
-        Self {
-            compiled: false,
-            tokens: vec![],
-            input,
-            dyn_conf: conf,
-            static_conf: mgc_conf,
-        }
-    }
-
+impl<'a> FirstPassCtx<'a> {
     /// Pushes the token nside the input between the start and end indices.
     /// The end index is exclusive.   
     #[inline]
@@ -148,78 +90,7 @@ impl<'a> MarkupFile<'a> {
         self.tokens.push(Token::new(ty, tape.pos, tape.pos + len));
     }
 
-    // ########################################## PASS 1 ##########################################
-
-    /// **PASS 1: VALIDATE UTF-8**
-    /// 
-    /// Returns true if the input is valid UTF-8, or false otherwise.
-    fn validate_utf8(&mut self) -> Result<(),MarkupError> {
-        basic::from_utf8(self.input)?;
-        Ok(())
-    } 
-
-    // ########################################## PASS 2 ##########################################
-
-    /// **PASS 2: PARSE VIRTUAL TOKENS**
-    ///
-    /// todo
-    #[must_use]
-    fn parse_virt_tokens(&mut self) -> FirstPassCtx {
-        let mut pass = FirstPassCtx {
-            in_alt_txt: false,
-            pgraph_spacing: 2,
-            open_quotes: vec![],
-            open_fmts: vec![],
-            fmt_pairs: vec![],
-        };
-        let mut tape = Tape::new(self.input);
-
-        // Because these symbols may show up in prose,
-        // we should expect them to most likely be plain text first.
-        //
-        // This means we should minimize the # of match arms.
-        while let Some(&ch) = self.input.get(tape.pos) {
-            let jump: Option<Tape<'a>> = match ch {
-                // ordered by expected frequency
-                b'\n' => {
-                    pass.pgraph_spacing = 2;
-                    self.emit_cur(tape, TokenType::Newline, 1);
-                    // Returning a positive result even though the cursor hasn't moved
-                    // results in a negligible performance hit
-                    // from copying the tape data structure.
-                    // It's more important to maintain semantics.
-                    Some(tape)
-                }
-                b'`' => self.handle_btick(&pass, tape),
-                b'$' => self.handle_dollar(&pass, tape),
-                b'-' => self.handle_dash(&mut pass, tape),
-                b'.' => self.handle_dot(&mut pass, tape),
-                b'*' => self.handle_star(&mut pass, tape),
-                b'_' => self.try_pair_cur(&mut pass, tape, InlineFormat::UNDERLINE_FLAG),
-                b'|' => self.try_pair_cur(&mut pass, tape, InlineFormat::HIGHLIGHT_FLAG),
-                b'~' => self.try_pair_cur(&mut pass, tape, InlineFormat::STRIKETHROUGH_FLAG),
-                b'[' => self.handle_obrac(&mut pass, tape),
-                b']' => self.handle_cbrac(&pass, tape),
-                b'=' => self.handle_equals(&mut pass, tape),
-                b'"' | b'\'' => self.handle_quote(&mut pass, tape, tape[tape.pos]),
-                b'\\' => self.handle_bslash(tape),
-                b';' => {   // divider comment ';;' handled by editor
-                    tape.seek_ch(b'\n');
-                    Some(tape)
-                }
-                _ => None,
-            };
-            if let Some(jump) = jump {
-                tape = jump;
-            }
-            tape.adv();
-        }
-        self.tokens
-            .push(Token::new(TokenType::Eof, tape.raw.len(), tape.raw.len()));
-        pass
-    }
-
-    /// Attempts to emit a token if the character cluster
+        /// Attempts to emit a token if the character cluster
     /// belongs to a flanking token, such as an inline format or link.
     ///
     /// The current position should be the first character in the cluster.
@@ -228,9 +99,8 @@ impl<'a> MarkupFile<'a> {
     /// If `None` is not returned, the length of `self.unclosed_pairs` is always modified
     /// and the cursor of the returned tape is left at the final character of the cluster.
     #[must_use]
-    fn try_pair_cur(
+    fn handle_pair(
         &mut self,
-        pass: &mut FirstPassCtx,
         mut tape: Tape<'a>,
         mask: u8,
     ) -> Option<Tape<'a>> {
@@ -246,16 +116,16 @@ impl<'a> MarkupFile<'a> {
         if tape.is_l_clear(start) && !tape.is_r_clear(tape.pos) {
             // open
             // lack of lookahead prevents bottleneck
-            pass.open_fmts.push((mask, start));
+            self.open_fmts.push((mask, start));
             tape.pos += len - 1;
             return Some(tape);
         } else if tape.is_r_clear(start)
-            && pass.open_fmts.last().is_some_and(|(t, _)| *t & mask != 0)
+            && self.open_fmts.last().is_some_and(|(t, _)| *t & mask != 0)
         {
             // close
-            let (open_mask, open_pos) = pass.open_fmts.pop().unwrap();
+            let (open_mask, open_pos) = self.open_fmts.pop().unwrap();
             let open_len = InlineFormat::len(open_mask);
-            pass.fmt_pairs.push((open_pos, start + len));
+            self.fmt_pairs.push((open_pos, start + len));
             // unsorted tokens don't matter since tokens are sorted after Pass 1
             if (mask & open_mask).ilog2() == 1 {
                 // basic pair
@@ -274,11 +144,11 @@ impl<'a> MarkupFile<'a> {
             } else {
                 // open_mask == BOLD_ITALIC_MASK
                 if mask == InlineFormat::BOLD_FLAG {
-                    pass.open_fmts.push((InlineFormat::ITALIC_FLAG, open_pos));
+                    self.open_fmts.push((InlineFormat::ITALIC_FLAG, open_pos));
                     self.emit(BOLD_TY, open_pos + 1, open_pos + 3);
                     self.emit_cur(tape, BOLD_TY, 2);
                 } else {
-                    pass.open_fmts.push((InlineFormat::BOLD_FLAG, open_pos));
+                    self.open_fmts.push((InlineFormat::BOLD_FLAG, open_pos));
                     self.emit(ITALIC_TY, open_pos + 2, open_pos + 3);
                     self.emit_cur(tape, ITALIC_TY, 1);
                 }
@@ -291,7 +161,7 @@ impl<'a> MarkupFile<'a> {
     /// Resolves whether a `'` or `"` character belongs to an admonition, a block quote
     /// (shorthand or long-form) or plain text.
     #[must_use]
-    fn handle_quote(&mut self, pass: &mut FirstPassCtx, mut tape: Tape<'a>, ty: u8) -> Option<Tape<'a>> {
+    fn handle_quote(&mut self, mut tape: Tape<'a>, ty: u8) -> Option<Tape<'a>> {
         // Would reuse logic for fenced code block, but that consumes inner content indiscrimantly
         // Consequence of syntax is that unlabeled quote blocks cannot be nested
         let start = tape.pos;
@@ -299,13 +169,12 @@ impl<'a> MarkupFile<'a> {
         if tape.is_at(delim) {
             if !tape.is_cur_prefix() {
                 return None;
-            }
+            } //todo finish
             tape.pos += 3; // skip over `"""` 
             let label = tape.consume(|ch, _| ch != b'\n').trim_file_ws();
-
             if label.is_empty() {
-                if let Some(&(double,pos, )) = pass.open_quotes.last() && double == (ty == b'"') {
-                    self.emit(TokenType::BlockQuoteOpen { label }, pos, pos + 3 + l);
+                if let Some(&(double,label,pos, )) = self.open_quotes.last() && double == (ty == b'"') {
+                    self.emit(TokenType::BlockQuoteOpen { label }, pos, pos + 3 + label.len());
                     self.emit(
                         TokenType::BlockQuoteClose,
                         start,
@@ -329,11 +198,11 @@ impl<'a> MarkupFile<'a> {
 
     /// Resolves whether a '[' character belongs to a link, an embed, or plain text.
     #[must_use]
-    fn handle_obrac(&mut self, pass: &mut FirstPassCtx, tape: Tape<'a>) -> Option<Tape<'a>> {
-        if pass.in_alt_txt {
+    fn handle_obrac(&mut self, tape: Tape<'a>) -> Option<Tape<'a>> {
+        if self.in_alt_txt {
             return None;
         }
-        tape.poll_in_pgraph(pass.pgraph_spacing, |ch, pos| {
+        tape.poll_in_pgraph(self.pgraph_spacing, |ch, pos| {
             let next = tape[pos + 1];
             ch == b']' && (next == b'(' || next == b'[')
         })?;
@@ -342,17 +211,17 @@ impl<'a> MarkupFile<'a> {
         } else {
             self.emit_cur(tape, TokenType::LinkMarker, 1);
         }
-        pass.in_alt_txt = true;
+        self.in_alt_txt = true;
         Some(tape)
     }
 
     /// Resolves whether a ']' character belongs to a link body, an embed body, or plain text.
     #[must_use]
-    fn handle_cbrac(&mut self, pass: &FirstPassCtx, mut tape: Tape<'a>) -> Option<Tape<'a>> {
-        if !pass.in_alt_txt {
+    fn handle_cbrac(&mut self, mut tape: Tape<'a>) -> Option<Tape<'a>> {
+        if !self.in_alt_txt {
             return None;
         }
-        let spacing = pass.pgraph_spacing;
+        let spacing = self.pgraph_spacing;
         let stop;
         let start = tape.pos;
         tape.adv(); // skip ']'
@@ -381,7 +250,7 @@ impl<'a> MarkupFile<'a> {
 
     /// Resolves whether a '.' character belongs to an ordered list item or plain text.
     #[must_use]
-    fn handle_dot(&mut self, pass: &mut FirstPassCtx, tape: Tape<'a>) -> Option<Tape<'a>> {
+    fn handle_dot(&mut self, tape: Tape<'a>) -> Option<Tape<'a>> {
         if tape.is_cur_prefix() {
             self.emit_cur(
                 tape,
@@ -391,7 +260,7 @@ impl<'a> MarkupFile<'a> {
                 },
                 1,
             );
-            pass.pgraph_spacing = 1;
+            self.pgraph_spacing = 1;
             return Some(tape);
         }
         let prev = tape.peek_back();
@@ -406,14 +275,14 @@ impl<'a> MarkupFile<'a> {
             tape.pos - 1,
             tape.pos + 1,
         );
-        pass.pgraph_spacing = 1;
+        self.pgraph_spacing = 1;
         Some(tape)
     }
 
     /// Resolves whether a '-' character belongs to an unordered list item,
     /// a checkbox, a horizontal rule, or plain text.
     #[must_use]
-    fn handle_dash(&mut self, pass: &mut FirstPassCtx, mut tape: Tape<'a>) -> Option<Tape<'a>> {
+    fn handle_dash(&mut self, mut tape: Tape<'a>) -> Option<Tape<'a>> {
         if matches!(tape.peek_back(), Some(b'o') | Some(b'x') | Some(b'?')) {
             // checkbox
             tape.dec(); // decrement to enable check on line start
@@ -429,7 +298,7 @@ impl<'a> MarkupFile<'a> {
                 2,
             );
             tape.adv();
-            pass.pgraph_spacing = 1;
+            self.pgraph_spacing = 1;
             return Some(tape); // stop at '-'
         }
         if !tape.is_cur_prefix() {
@@ -451,13 +320,13 @@ impl<'a> MarkupFile<'a> {
             },
             1,
         );
-        pass.pgraph_spacing = 1;
+        self.pgraph_spacing = 1;
         Some(tape) // stop at '-'
     }
 
     /// Resolves whether a '=' character belongs to a heading or plain text.
     #[must_use]
-    fn handle_equals(&mut self, pass: &mut FirstPassCtx, mut tape: Tape<'a>) -> Option<Tape<'a>> {
+    fn handle_equals(&mut self, mut tape: Tape<'a>) -> Option<Tape<'a>> {
         if !tape.is_cur_prefix() {
             return None;
         }
@@ -468,7 +337,7 @@ impl<'a> MarkupFile<'a> {
             return Some(tape); // treat as text, but skip next few '='
         }
         self.emit(TokenType::Heading { depth: depth as u8 }, start, tape.pos);
-        pass.pgraph_spacing = 1;
+        self.pgraph_spacing = 1;
         tape.dec();
         Some(tape) // stop at final '='
     }
@@ -476,7 +345,7 @@ impl<'a> MarkupFile<'a> {
     /// Resolves whether a '$' character belongs to inline math,
     /// a dollar sign literal (if enabled), or plain text.
     #[must_use]
-    fn handle_dollar(&mut self, pass: &FirstPassCtx, mut tape: Tape<'a>) -> Option<Tape<'a>> {
+    fn handle_dollar(&mut self, mut tape: Tape<'a>, finance_mode: bool) -> Option<Tape<'a>> {
         let start = tape.pos;
         if tape.is_at(b"$$") {
             if !tape.is_cur_prefix() {
@@ -498,10 +367,10 @@ impl<'a> MarkupFile<'a> {
             );
             tape.pos += 2; // stop at last '$$'
         }
-        if self.static_conf.finance_mode {
+        if finance_mode {
             return None;
         }
-        if !tape.seek_ch_in_pgraph(pass.pgraph_spacing, b'$') {
+        if !tape.seek_ch_in_pgraph(self.pgraph_spacing, b'$') {
             // failed lookahead
             return None; // stop at '$'
         }
@@ -517,9 +386,9 @@ impl<'a> MarkupFile<'a> {
 
     /// Resolves whether a '`' character belongs to inline code or plain text.
     #[must_use]
-    fn handle_btick(&mut self, pass: &FirstPassCtx, mut tape: Tape<'a>) -> Option<Tape<'a>> {
+    fn handle_btick(&mut self, mut tape: Tape<'a>) -> Option<Tape<'a>> {
         let start = tape.pos;
-        let spacing = pass.pgraph_spacing;
+        let spacing = self.pgraph_spacing;
         if tape.is_at(b"```") {
             if !tape.is_cur_prefix() {
                 return None;
@@ -574,18 +443,17 @@ impl<'a> MarkupFile<'a> {
     /// Resolves whether a `*` character belongs to a bold token,
     /// an italic token, both, or plain text.
     #[must_use]
-    fn handle_star(&mut self, pass: &mut FirstPassCtx, tape: Tape<'a>) -> Option<Tape<'a>> {
+    fn handle_star(&mut self, tape: Tape<'a>) -> Option<Tape<'a>> {
         if tape.is_at(b"***") {
-            self.try_pair_cur(
-                pass,
+            self.handle_pair(
                 tape,
                 InlineFormat::BOLD_FLAG | InlineFormat::ITALIC_FLAG,
             )
         } else if tape.is_at(b"**") {
-            self.try_pair_cur(pass, tape, InlineFormat::BOLD_FLAG)
+            self.handle_pair(tape, InlineFormat::BOLD_FLAG)
         } else {
             // try for '*'
-            self.try_pair_cur(pass, tape, InlineFormat::ITALIC_FLAG)
+            self.handle_pair(tape, InlineFormat::ITALIC_FLAG)
         }
     }
 
@@ -650,6 +518,138 @@ impl<'a> MarkupFile<'a> {
         }
         Some(tape)
     }
+}
+
+struct MarkupOutput;//todo
+
+#[derive(Error, Debug)]
+pub enum MarkupError {
+    #[error("Invalid UTF-8")]
+    InvalidUtf8(#[from] Utf8Error),
+}
+
+/// Draft markup syntax.
+/// 
+/// todo explain compilation process
+/// todo use mutable state instead of return type for simplicity
+#[derive(Debug)]
+pub struct MarkupFile<'a> {
+    compiled: bool,
+
+    /// The input text.
+    pub input: &'a [u8],
+
+    /// Dynamic configuration.
+    pub dyn_conf: &'a DynConf,
+
+    /// Static configuration.
+    pub static_conf: &'a StaticConf,
+}
+
+impl<'a> Compile for MarkupFile<'a> {
+    type Output = Result<, MarkupError>;
+
+    fn compile(&mut self) -> Self::Output {
+        if self.compiled {
+            return Ok(());
+        }
+        self.validate_utf8()?;
+        let tokens = self.parse_virtual_tokens();
+        let tokens = self.prune_bad_tokens(tokens);
+        let tokens = self.parse_text_tokens(tokens);
+        let ast = self.assemble_ast(tokens);
+        let output = self.assemble_html(ast);
+        // todo hook-in sanitization?
+        self.compiled = true;
+        Ok(())
+    }
+
+    fn is_compiled(&self) -> bool {
+        self.compiled
+    }
+}
+
+impl<'a> MarkupFile<'a> {
+    pub fn new(dyn_conf: &'a DynConf, static_conf: &'a StaticConf, input: &'a [u8]) -> Self {
+        Self {
+            compiled: false,
+            input,
+            dyn_conf,
+            static_conf,
+        }
+    }
+
+    // ########################################## PASS 1 ##########################################
+
+    /// **PASS 1: VALIDATE UTF-8**
+    /// 
+    /// Returns true if the input is valid UTF-8, or false otherwise.
+    fn validate_utf8(&mut self) -> Result<(),MarkupError> {
+        basic::from_utf8(self.input)?;
+        Ok(())
+    } 
+
+    // ########################################## PASS 2 ##########################################
+
+    /// **PASS 2: PARSE VIRTUAL TOKENS**
+    ///
+    /// todo
+    #[must_use]
+    fn parse_virtual_tokens(&mut self) -> Vec<Token<'a>> {
+        let mut pass = FirstPassCtx {
+            in_alt_txt: false,
+            pgraph_spacing: 2,
+            tokens: vec![],
+            open_quotes: vec![],
+            open_fmts: vec![],
+            fmt_pairs: vec![],
+        };
+        let mut tape = Tape::new(self.input);
+
+        // Because these symbols may show up in prose,
+        // we should expect them to most likely be plain text first.
+        //
+        // This means we should minimize the # of match arms.
+        while let Some(&ch) = self.input.get(tape.pos) {
+            let jump: Option<Tape<'a>> = match ch {
+                // ordered by expected frequency
+                b'\n' => {
+                    pass.pgraph_spacing = 2;
+                    pass.emit_cur(tape, TokenType::Newline, 1);
+                    // Returning a positive result even though the cursor hasn't moved
+                    // results in a negligible performance hit
+                    // from copying the tape data structure.
+                    // It's more important to maintain semantics.
+                    Some(tape)
+                }
+                b'`' => pass.handle_btick(tape),
+                b'$' => pass.handle_dollar(tape, self.static_conf.finance_mode),
+                b'-' => pass.handle_dash(tape),
+                b'.' => pass.handle_dot(tape),
+                b'*' => pass.handle_star(tape),
+                b'_' => pass.handle_pair(tape, InlineFormat::UNDERLINE_FLAG),
+                b'|' => pass.handle_pair(tape, InlineFormat::HIGHLIGHT_FLAG),
+                b'~' => pass.handle_pair(tape, InlineFormat::STRIKETHROUGH_FLAG),
+                b'[' => pass.handle_obrac(tape),
+                b']' => pass.handle_cbrac(tape),
+                b'=' => pass.handle_equals(tape),
+                b'"' | b'\'' => pass.handle_quote(tape, tape[tape.pos]),
+                b'\\' => pass.handle_bslash(tape),
+                b';' => {   // divider comment ';;' handled by editor
+                    tape.seek_ch(b'\n');
+                    Some(tape)
+                }
+                _ => None,
+            };
+            if let Some(jump) = jump {
+                tape = jump;
+            }
+            tape.adv();
+        }
+        pass.tokens
+            .push(Token::new(TokenType::Eof, tape.raw.len(), tape.raw.len()));
+        pass.tokens
+    }
 
     // ########################################## PASS 3 ##########################################
 
@@ -664,12 +664,14 @@ impl<'a> MarkupFile<'a> {
     ///
     /// Since it would be incredibly difficult to determine whether a macro actually
     /// emits visible text or not, let's just assume they all do when pruning virtual tokens.
-    fn prune_virt_tokens(&mut self) {
-        if self.tokens.is_empty() { return; }
+    /// 
+    /// The remaining tokens sorted as they appear in the input.
+    fn prune_bad_tokens(&mut self, mut tokens: Vec<Token<'a>>) -> Vec<Token<'a>> {
+        if tokens.is_empty() { return vec![]; }
         let mut to_prune = HashSet::new();
         let mut last_marker_idx: Option<usize> = None;
-        for i in 0..self.tokens.len() {  // identify everything to kill
-            match self.tokens[i].ty {
+        for i in 0..tokens.len() {  // identify everything to kill
+            match tokens[i].ty {
                 TokenType::LinkMarker | TokenType::EmbedMarker => {
                     last_marker_idx = Some(i);
                     // assume it's pruned until we find a body
@@ -682,7 +684,7 @@ impl<'a> MarkupFile<'a> {
                 }
                 TokenType::Heading { .. } | TokenType::ListItem { .. } | TokenType::NumberedItem { .. } => {
                     // peek forward safely because we aren't in retain yet
-                    let is_empty = self.tokens.get(i + 1)
+                    let is_empty = tokens.get(i + 1)
                         .map_or(true, |next| next.ty == TokenType::Newline);
                     if is_empty {
                         to_prune.insert(i);
@@ -693,14 +695,14 @@ impl<'a> MarkupFile<'a> {
             }
         }
         let mut cur_idx = 0;
-        self.tokens.retain(|_| {
+        tokens.retain(|_| {
             let prune = to_prune.contains(&cur_idx);
             cur_idx += 1;
             !prune
         });
-
-        self.tokens
+        tokens
             .sort_unstable_by(|t1, t2| t1.start.cmp(&t2.start));
+        tokens
     }
 
     // ########################################## PASS 4 ##########################################
@@ -708,7 +710,7 @@ impl<'a> MarkupFile<'a> {
     /// **PASS 4: PARSE PLAINTEXT TOKENS**
     ///
     /// todo
-    fn parse_txt_tokens(&mut self) {
+    fn parse_text_tokens(&mut self, mut tokens: Vec<Token<'a>>) -> Vec<Token<'a>> {
         //here, we have all the meaningful virtual tokens found
         // I don't know what to do with the pair heap yet.
         // However, just iterate over it. Match the position to the next one in the virtual tokens.
@@ -716,12 +718,12 @@ impl<'a> MarkupFile<'a> {
         let mut read = 0;
         let mut txt_start = 0;
         let mut pos = 0;
-        while read < self.tokens.len() {
+        while read < tokens.len() {
             // collect plaintext tokens
-            let next = &self.tokens[read];
+            let next = &tokens[read];
             if next.start == pos {
                 if pos - txt_start != 0 {
-                    self.emit(TokenType::Plaintext, txt_start, pos);
+                    pass.emit(TokenType::Plaintext, txt_start, pos);
                 }
                 read += 1;
                 pos += next.len();
@@ -737,7 +739,7 @@ impl<'a> MarkupFile<'a> {
     /// **PASS 5: CONSTRUCT AST**
     ///
     /// todo
-    fn construct_ast(&mut self) {
+    fn assemble_ast(&mut self, mut tokens: Vec<Token<'a>>) -> Ast<'a> {
         self.tokens
     }
 
@@ -746,7 +748,7 @@ impl<'a> MarkupFile<'a> {
     /// **PASS 6: EMIT HTML**
     ///
     /// todo
-    fn generate_output(&mut self) -> String {
+    fn assemble_html(&mut self, ast: Ast<'a>) -> String {
         
     }
 }
