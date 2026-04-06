@@ -268,7 +268,7 @@ impl<'a> ObjectFile<'a> {
     }
 
     fn parse_list(&mut self, tape: &mut Tape<'a>) -> Result<ObjectValue, ObjectError> {
-        let mut items = Vec::new();
+        let mut items = vec![];
         loop {
             tape.consume(|ch,_| ch.is_file_ws() || ch == b'\n');
             if tape.cur() == Some(b'}') {
