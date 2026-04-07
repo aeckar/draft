@@ -1,9 +1,7 @@
-use std::ops::Index;
-
 use simdutf8::basic::{self, Utf8Error};
 use thiserror::Error;
 
-use crate::ast::Ast;
+use crate::ast::AstNode;
 use crate::compile::Compile;
 use crate::ext::{CharExt, SliceExt};
 use crate::tape::Tape;
@@ -519,7 +517,7 @@ pub struct MarkupFile<'a> {
 }
 
 impl<'a> Compile for MarkupFile<'a> {
-    type Output = Result<Ast<'a>, MarkupError>;
+    type Output = Result<AstNode<'a>, MarkupError>;
 
     fn compile(self) -> Self::Output {
         if !self.static_conf.trusted_mode {
@@ -527,7 +525,7 @@ impl<'a> Compile for MarkupFile<'a> {
         }
         let tokens = self.parse_special_tokens();
         let mut tokens = self.parse_text_tokens(tokens);
-        self.transform_bad_tokens(&mut tokens);
+        self.convert_bad_tokens(&mut tokens);
         let ast = self.assemble_ast(tokens);
         Ok(ast)
     }
@@ -643,10 +641,11 @@ impl<'a> MarkupFile<'a> {
     ///
     /// Since macro expansion is handled outside of the compiler, we assume that all macro
     /// invocations produce text at this stage.
-    fn transform_bad_tokens(&self, tokens: &mut Vec<Token<'a>>) {
+    fn convert_bad_tokens(&self, tokens: &mut Vec<Token<'a>>) {
         use TokenSpec::*;
         for i in 0..tokens.len() {
-            match tokens[i].spec {  // access by index to satisfy borrow checker
+            match tokens[i].spec {
+                // access by index to satisfy borrow checker
                 Heading { .. }
                 | LineQuoteMarker
                 | ListItem { .. }
@@ -681,7 +680,7 @@ impl<'a> MarkupFile<'a> {
     }
 
     #[must_use]
-    fn assemble_ast(&self, mut tokens: Vec<Token<'a>>) -> Ast<'a> {
+    fn assemble_ast(&self, mut tokens: Vec<Token<'a>>) -> AstNode<'a> {
         self.tokens
     }
 }

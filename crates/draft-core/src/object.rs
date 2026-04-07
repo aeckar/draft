@@ -8,7 +8,7 @@ use crate::compile::Compile;
 use crate::ext::{CharExt, SliceExt};
 use crate::tape::Tape;
 
-/// An instance of an `malo` data type.
+/// An instance of a Draft object.
 ///
 /// Roughly reflects JSON data types. Numbers **must** start with a digit.
 /// Unlike standard JSON, allows for trailing commas.
