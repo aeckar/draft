@@ -1,3 +1,5 @@
+use std::ops::Index;
+
 use simdutf8::basic::{self, Utf8Error};
 use thiserror::Error;
 
@@ -381,7 +383,7 @@ impl<'a> FirstPass<'a> {
             }
             tape.pos += 3; // skip over '```'
             let lang = tape.consume(|ch, _| ch != b'\n');
-            let body_start = tape.pos + 1;
+            let body_start = tape.pos + 1; // after '\n'
             if !tape.seek_at(b"\n```") {
                 // failed lookahead
                 return None;
@@ -524,8 +526,8 @@ impl<'a> Compile for MarkupFile<'a> {
             self.validate_utf8()?;
         }
         let tokens = self.parse_special_tokens();
-        let tokens = self.parse_text_tokens(tokens);
-        let tokens = self.transform_bad_tokens(tokens);
+        let mut tokens = self.parse_text_tokens(tokens);
+        self.transform_bad_tokens(&mut tokens);
         let ast = self.assemble_ast(tokens);
         Ok(ast)
     }
@@ -629,7 +631,7 @@ impl<'a> MarkupFile<'a> {
         result
     }
 
-    /// Transforms malformed Draft syntax into plaintext, including:
+    /// Transforms malformed structures into plaintext, including:
     /// - Links/Embeds without a body
     /// - Empty headings
     /// - Empty list items
@@ -637,20 +639,45 @@ impl<'a> MarkupFile<'a> {
     /// - Empty math blocks
     /// - Empty code blocks
     ///
+    /// Malformed tokens found are marked as plaintext.
+    ///
     /// Since macro expansion is handled outside of the compiler, we assume that all macro
     /// invocations produce text at this stage.
-    #[must_use]
-    fn transform_bad_tokens(&self, tokens: Vec<Token<'a>>) -> Vec<Token<'a>> {
+    fn transform_bad_tokens(&self, tokens: &mut Vec<Token<'a>>) {
         use TokenSpec::*;
-        let mut result = Vec::with_capacity(tokens.capacity());
-        for (i, &[token, next]) in tokens.windows(2).enumerate() {
-            match token {
-                Heading { .. } | LineQuoteMarker | Checkbox { .. } if !next.spec.is_content() => {
-                    token.spec = TokenSpec::Plaintext;
+        for i in 0..tokens.len() {
+            match tokens[i].spec {  // access by index to satisfy borrow checker
+                Heading { .. }
+                | LineQuoteMarker
+                | ListItem { .. }
+                | NumberedItem { .. }
+                | Checkbox { .. }
+                    if !tokens.get(i + 1).is_some_and(|t| t.spec.is_content()) =>
+                {
+                    tokens[i].make_raw();
                 }
+                LinkMarker | EmbedMarker
+                    if tokens
+                        .iter()
+                        .find(|t| matches!(t.spec, LinkBody { .. }) || t.spec.is_content())
+                        .is_some_and(|t| matches!(t.spec, LinkBody { .. })) =>
+                {
+                    tokens[i].make_raw();
+                }
+                CodeBlock { body, .. } | MathBlock { body } if body.is_empty() => {
+                    tokens[i].make_raw();
+                }
+                BlockQuoteOpen
+                    if tokens
+                        .iter()
+                        .find(|t| t.spec == BlockQuoteClose || t.spec.is_content())
+                        .is_some_and(|t| t.spec.is_content()) =>
+                {
+                    tokens[i].make_raw();
+                }
+                _ => {}
             }
         }
-        ""
     }
 
     #[must_use]

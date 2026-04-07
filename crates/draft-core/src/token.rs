@@ -86,6 +86,7 @@ impl CheckboxType {
 /// in range they represent (see comments).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenSpec<'a> {
+    // Content
     Plaintext,
     Literal { ch: u8 },                // preceded by `\`
     LinkBody { href: &'a [u8] },       // ]( )
@@ -98,6 +99,7 @@ pub enum TokenSpec<'a> {
     InlineMath { body: &'a [u8] },    // $ $
     InlineFormat { ty: InlineFormat },
 
+    // Everything else
     Newline,
     HorizontalRule, // doubles as row divider, if enabled
     LineQuoteMarker,
@@ -111,10 +113,7 @@ pub enum TokenSpec<'a> {
     Checkbox { depth: u8, ty: CheckboxType },
     ListItem { depth: u8 },
     NumberedItem { depth: u8, ty: Numbering },
-
-    //todo works for citations via interpolation (`{paul}` => `[paul]=cite.{}`)
-    AssignmentMarker { alias: &'a [u8] }, // [<key>]=<value>
-
+    AssignmentMarker { alias: &'a [u8] }, // [<key>]=<value>//todo works for citations via interpolation (`{paul}` => `[paul]=cite.{}`)
     Eof, // necessary to find bound for trailing plaintext
 }
 
@@ -158,5 +157,9 @@ impl<'a> Token<'a> {
     #[inline(always)]
     pub fn len(&self) -> usize {
         self.end - self.start
+    }
+
+    pub fn make_raw(&mut self) {
+        self.spec = TokenSpec::Plaintext;
     }
 }
