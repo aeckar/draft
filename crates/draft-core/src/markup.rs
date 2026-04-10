@@ -7,7 +7,7 @@ use crate::ext::{CharExt, SliceExt};
 use crate::tape::Tape;
 use crate::token::{CheckboxType, InlineFormat, Numbering, Token, TokenSpec};
 
-/// Dynamic configuration optionsset by the `\file` macro or by `config.mgon`.
+/// Dynamic configuration options set by the `\file` macro or by `config.mgon`.
 ///
 /// These options can be changed at any point within a markup file by a macro.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,7 +38,7 @@ pub enum MarkupError {
 }
 
 /// Encapsulates mutable state shared between different handlers during Pass 1.
-struct FirstPass<'a> {
+struct VirtualLexer<'a> {
     /// Virtual (non-plaintext) tokens.
     tokens: Vec<Token<'a>>,
 
@@ -67,7 +67,7 @@ struct FirstPass<'a> {
 }
 
 /// All `handle_X` functions assume cursor is at a valid character.
-impl<'a> FirstPass<'a> {
+impl<'a> VirtualLexer<'a> {
     /// Pushes the token nside the input between the start and end indices.
     /// The end index is exclusive.   
     #[inline]
@@ -79,7 +79,7 @@ impl<'a> FirstPass<'a> {
     /// and has the given length.
     //do not return tape for convenience, as `pos` might need to be adjusted before exiting handler.
     #[inline]
-    fn emit_inplace(&mut self, tape: Tape, spec: TokenSpec<'a>, len: usize) {
+    fn emit_inplace(&mut self, tape: Tape<'a,u8>, spec: TokenSpec<'a>, len: usize) {
         self.tokens.push(Token::new(spec, tape.pos, tape.pos + len));
     }
 
@@ -92,7 +92,7 @@ impl<'a> FirstPass<'a> {
     /// If `None` is not returned, the length of `self.unclosed_pairs` is always modified
     /// and the cursor of the returned tape is left at the final character of the cluster.
     #[must_use]
-    fn handle_pair(&mut self, mut tape: Tape<'a>, mask: u8) -> Option<Tape<'a>> {
+    fn handle_pair(&mut self, mut tape: Tape<'a,u8>, mask: u8) -> Option<Tape<'a,u8>> {
         const BOLD_ITALIC_MASK: u8 = InlineFormat::BOLD_FLAG | InlineFormat::ITALIC_FLAG;
         const BOLD_TY: TokenSpec<'static> = TokenSpec::InlineFormat {
             ty: InlineFormat::Bold,
@@ -154,7 +154,7 @@ impl<'a> FirstPass<'a> {
     /// inner content indiscrimantly. Instead, it behaves like a link,
     /// with inner markup being seperate from the token itself.
     #[must_use]
-    fn handle_quote(&mut self, mut tape: Tape<'a>, quote: u8) -> Option<Tape<'a>> {
+    fn handle_quote(&mut self, mut tape: Tape<'a,u8>, quote: u8) -> Option<Tape<'a,u8>> {
         if !tape.is_cur_prefix() {
             return None;
         }
@@ -185,12 +185,12 @@ impl<'a> FirstPass<'a> {
 
     /// Resolves whether a '[' character belongs to a link, an embed, or plain text.
     #[must_use]
-    fn handle_obrac(&mut self, mut tape: Tape<'a>) -> Option<Tape<'a>> {
+    fn handle_obrac(&mut self, mut tape: Tape<'a,u8>) -> Option<Tape<'a,u8>> {
         if self.in_alt_text {
             return None;
         }
         tape.adv(); // skip '['
-        
+
         tape.poll_in_pgraph(self.pgraph_spacing, |ch, pos| {
             let next = tape[pos + 1];
             ch == b']' && (next == b'(' || next == b'[')
@@ -206,7 +206,7 @@ impl<'a> FirstPass<'a> {
 
     /// Resolves whether a ']' character belongs to a link body, an embed body, or plain text.
     #[must_use]
-    fn handle_cbrac(&mut self, mut tape: Tape<'a>) -> Option<Tape<'a>> {
+    fn handle_cbrac(&mut self, mut tape: Tape<'a,u8>) -> Option<Tape<'a,u8>> {
         if !self.in_alt_text {
             return None;
         }
@@ -239,11 +239,11 @@ impl<'a> FirstPass<'a> {
 
     /// Resolves whether a '.' character belongs to an ordered list item or plain text.
     #[must_use]
-    fn handle_dot(&mut self, tape: Tape<'a>) -> Option<Tape<'a>> {
+    fn handle_dot(&mut self, tape: Tape<'a,u8>) -> Option<Tape<'a,u8>> {
         if tape.is_cur_prefix() {
             self.emit_inplace(
                 tape,
-                TokenSpec::NumberedItem {
+                TokenSpec::NumberedItemMarker {
                     depth: tape.count_indent(),
                     ty: Numbering::Continuation,
                 },
@@ -257,7 +257,7 @@ impl<'a> FirstPass<'a> {
             return None;
         }
         self.emit(
-            TokenSpec::NumberedItem {
+            TokenSpec::NumberedItemMarker {
                 depth: tape.count_indent(),
                 ty: Numbering::from_marker(prev.unwrap())?,
             },
@@ -271,7 +271,7 @@ impl<'a> FirstPass<'a> {
     /// Resolves whether a '-' character belongs to an unordered list item,
     /// a checkbox, a horizontal rule, or plain text.
     #[must_use]
-    fn handle_dash(&mut self, mut tape: Tape<'a>) -> Option<Tape<'a>> {
+    fn handle_dash(&mut self, mut tape: Tape<'a,u8>) -> Option<Tape<'a,u8>> {
         if matches!(tape.peek_back(), Some(b'o') | Some(b'x') | Some(b'?')) {
             // checkbox
             tape.dec(); // decrement to enable check on line start
@@ -304,7 +304,7 @@ impl<'a> FirstPass<'a> {
         }
         self.emit_inplace(
             tape,
-            TokenSpec::ListItem {
+            TokenSpec::ListItemMarker {
                 depth: tape.count_indent(),
             },
             1,
@@ -315,7 +315,7 @@ impl<'a> FirstPass<'a> {
 
     /// Resolves whether a '=' character belongs to a heading or plain text.
     #[must_use]
-    fn handle_equals(&mut self, mut tape: Tape<'a>) -> Option<Tape<'a>> {
+    fn handle_equals(&mut self, mut tape: Tape<'a,u8>) -> Option<Tape<'a,u8>> {
         if !tape.is_cur_prefix() {
             return None;
         }
@@ -334,7 +334,7 @@ impl<'a> FirstPass<'a> {
     /// Resolves whether a '$' character belongs to inline math,
     /// a dollar sign literal (if enabled), or plain text.
     #[must_use]
-    fn handle_dollar(&mut self, mut tape: Tape<'a>, finance_mode: bool) -> Option<Tape<'a>> {
+    fn handle_dollar(&mut self, mut tape: Tape<'a,u8>, finance_mode: bool) -> Option<Tape<'a,u8>> {
         let start = tape.pos;
         if tape.is_at(b"$$") {
             if !tape.is_cur_prefix() {
@@ -375,7 +375,7 @@ impl<'a> FirstPass<'a> {
 
     /// Resolves whether a '`' character belongs to inline code or plain text.
     #[must_use]
-    fn handle_btick(&mut self, mut tape: Tape<'a>) -> Option<Tape<'a>> {
+    fn handle_btick(&mut self, mut tape: Tape<'a,u8>) -> Option<Tape<'a,u8>> {
         let start = tape.pos;
         let spacing = self.pgraph_spacing;
         if tape.is_at(b"```") {
@@ -432,7 +432,7 @@ impl<'a> FirstPass<'a> {
     /// Resolves whether a `*` character belongs to a bold token,
     /// an italic token, both, or plain text.
     #[must_use]
-    fn handle_star(&mut self, tape: Tape<'a>) -> Option<Tape<'a>> {
+    fn handle_star(&mut self, tape: Tape<'a,u8>) -> Option<Tape<'a,u8>> {
         if tape.is_at(b"***") {
             self.handle_pair(tape, InlineFormat::BOLD_FLAG | InlineFormat::ITALIC_FLAG)
         } else if tape.is_at(b"**") {
@@ -446,7 +446,7 @@ impl<'a> FirstPass<'a> {
     /// Resolves whether a `\` character
     /// belongs to an escape character, a macro, or plain text.
     #[must_use]
-    fn handle_bslash(&mut self, mut tape: Tape<'a>) -> Option<Tape<'a>> {
+    fn handle_bslash(&mut self, mut tape: Tape<'a,u8>) -> Option<Tape<'a,u8>> {
         if tape.pos == tape.raw.len() - 1 {
             return None;
         }
@@ -506,6 +506,22 @@ impl<'a> FirstPass<'a> {
     }
 }
 
+struct Parser<'a> {
+    tokens: Vec<Token<'a>>
+}
+
+impl<'a> Compile for Parser<'a> {
+    type Output = Result<AstNode<'a>, MarkupError>;
+
+    fn compile(self) -> Self::Output {
+        top_level_element(self.tokens)
+    }
+}
+
+impl<'a> Parser<'a> {
+    fn top_level_element(mut token: Vec<)
+}
+
 /// Draft markup syntax.
 #[derive(Debug)]
 pub struct MarkupFile<'a> {
@@ -526,7 +542,7 @@ impl<'a> Compile for MarkupFile<'a> {
         if !self.static_conf.trusted_mode {
             self.validate_utf8()?;
         }
-        let tokens = self.parse_special_tokens();
+        let tokens = self.parse_virtual_tokens();
         let mut tokens = self.parse_text_tokens(tokens);
         self.convert_bad_tokens(&mut tokens);
         let ast = self.assemble_ast(tokens);
@@ -550,8 +566,8 @@ impl<'a> MarkupFile<'a> {
     }
 
     #[must_use]
-    fn parse_special_tokens(&self) -> Vec<Token<'a>> {
-        let mut pass = FirstPass {
+    fn parse_virtual_tokens(&self) -> Vec<Token<'a>> {
+        let mut lex = VirtualLexer {
             in_alt_text: false,
             pgraph_spacing: 2,
             tokens: vec![],
@@ -565,30 +581,30 @@ impl<'a> MarkupFile<'a> {
         //
         // This means we should minimize the # of match arms.
         while let Some(&ch) = self.input.get(tape.pos) {
-            let jump: Option<Tape<'a>> = match ch {
+            let jump: Option<Tape<'a,u8>> = match ch {
                 // ordered by expected frequency
                 b'\n' => {
-                    pass.pgraph_spacing = 2;
-                    pass.emit_inplace(tape, TokenSpec::Newline, 1);
+                    lex.pgraph_spacing = 2;
+                    lex.emit_inplace(tape, TokenSpec::Newline, 1);
                     // Returning a positive result even though the cursor hasn't moved
                     // results in a negligible performance hit
                     // from copying the tape data structure.
                     // It's more important to maintain semantics.
                     Some(tape)
                 }
-                b'`' => pass.handle_btick(tape),
-                b'$' => pass.handle_dollar(tape, self.static_conf.finance_mode),
-                b'-' => pass.handle_dash(tape),
-                b'.' => pass.handle_dot(tape),
-                b'*' => pass.handle_star(tape),
-                b'_' => pass.handle_pair(tape, InlineFormat::UNDERLINE_FLAG),
-                b'|' => pass.handle_pair(tape, InlineFormat::HIGHLIGHT_FLAG),
-                b'~' => pass.handle_pair(tape, InlineFormat::STRIKETHROUGH_FLAG),
-                b'[' => pass.handle_obrac(tape),
-                b']' => pass.handle_cbrac(tape),
-                b'=' => pass.handle_equals(tape),
-                b'"' | b'\'' => pass.handle_quote(tape, tape[tape.pos]),
-                b'\\' => pass.handle_bslash(tape),
+                b'`' => lex.handle_btick(tape),
+                b'$' => lex.handle_dollar(tape, self.static_conf.finance_mode),
+                b'-' => lex.handle_dash(tape),
+                b'.' => lex.handle_dot(tape),
+                b'*' => lex.handle_star(tape),
+                b'_' => lex.handle_pair(tape, InlineFormat::UNDERLINE_FLAG),
+                b'|' => lex.handle_pair(tape, InlineFormat::HIGHLIGHT_FLAG),
+                b'~' => lex.handle_pair(tape, InlineFormat::STRIKETHROUGH_FLAG),
+                b'[' => lex.handle_obrac(tape),
+                b']' => lex.handle_cbrac(tape),
+                b'=' => lex.handle_equals(tape),
+                b'"' | b'\'' => lex.handle_quote(tape, tape[tape.pos]),
+                b'\\' => lex.handle_bslash(tape),
                 b';' => {
                     // divider comment ';;' handled by editor
                     tape.seek_ch(b'\n');
@@ -601,11 +617,11 @@ impl<'a> MarkupFile<'a> {
             }
             tape.adv();
         }
-        pass.tokens
+        lex.tokens
             .push(Token::new(TokenSpec::Eof, tape.raw.len(), tape.raw.len()));
-        pass.tokens
+        lex.tokens
             .sort_unstable_by(|t1, t2| t1.start.cmp(&t2.start));
-        pass.tokens
+        lex.tokens
     }
 
     #[must_use]
@@ -651,8 +667,8 @@ impl<'a> MarkupFile<'a> {
                 // access by index to satisfy borrow checker
                 Heading { .. }
                 | LineQuoteMarker
-                | ListItem { .. }
-                | NumberedItem { .. }
+                | ListItemMarker { .. }
+                | NumberedItemMarker { .. }
                 | Checkbox { .. }
                     if !tokens.get(i + 1).is_some_and(|t| t.spec.is_content()) =>
                 {
@@ -682,8 +698,60 @@ impl<'a> MarkupFile<'a> {
         }
     }
 
+    // 1. make rules for tokens that easily combine
+    // 2.
+
+    /// Assembles the AST according to the following grammar:
+    /// ```ebnf
+    /// topLevelElement := HorizontalRule
+    ///     | CodeBlock
+    ///     | MathBlock
+    ///     | paragraph
+    ///     | list
+    ///     | heading
+    ///     | lineQuote
+    ///     | blockQuote
+    /// heading := Heading
+    ///     & line
+    ///     & Newline
+    /// paragraph := Plaintext | Literal | link
+    ///
+    /// line := lineElement+
+    ///     & Newline
+    /// lineElement := Plaintext
+    ///     | InlineCode
+    ///     | InlineMath
+    ///     | InlineRawCode
+    ///     | Literal
+    ///     | format
+    ///     | link
+    ///     | embed
+    ///
+    /// format := InlineFormat plaintext InlineFormat
+    /// link := LinkMarker & linkTarget
+    /// embed := EmbedMarker & linkTarget
+    /// linkTarget := LinkBody | LinkAliasBody
+    ///
+    /// lineQuote := LineQuoteMarker & line
+    /// blockQuote := BlockQuoteOpen
+    ///     & (line | Newline)
+    ///     & topLevelElement+
+    ///     & BlockQuoteClose
+    ///
+    /// list := orderedList | numberedList | checklist
+    /// orderedList := (ListItemMarker & line)+
+    /// numberedList := (NumberedItemMarker & line)+
+    /// checklist := (Checkbox & line)+
+    ///
+    /// macro := MacroHandle
+    ///     & MacroArgs?
+    ///     & MacroBody*
+    /// ```
     #[must_use]
-    fn assemble_ast(&self, mut tokens: Vec<Token<'a>>) -> AstNode<'a> {
-        self.tokens
+    fn assemble_ast(&self, tokens: Vec<Token<'a>>) -> AstNode<'a> {
+        fn top_level_element() -> Result<AstNode>
+
+        let root = AstNode::root();
+        
     }
 }

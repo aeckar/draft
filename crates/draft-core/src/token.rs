@@ -111,10 +111,10 @@ pub enum TokenSpec<'a> {
     CodeBlock { body: &'a [u8], lang: &'a [u8] },
     MathBlock { body: &'a [u8] },
     Checkbox { depth: u8, ty: CheckboxType },
-    ListItem { depth: u8 },
-    NumberedItem { depth: u8, ty: Numbering },
+    ListItemMarker { depth: u8 },
+    NumberedItemMarker { depth: u8, ty: Numbering },
     AssignmentMarker { alias: &'a [u8] }, // [<key>]=<value>//todo works for citations via interpolation (`{paul}` => `[paul]=cite.{}`)
-    Eof, // necessary to find bound for trailing plaintext
+    Eof,                                  // necessary to find bound for trailing plaintext
 }
 
 impl TokenSpec<'_> {

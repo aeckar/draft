@@ -37,62 +37,69 @@ fn count_indent(ws: &[u8]) -> u8 {
 /// `pos` is used to distinguish indices in a `Tape` from other data structures.
 /// It is not guaranteed to be within the acceptable range of indices at any given point,
 /// but member functions assume so.
+///
+/// Other common names for this data structure are *cursor* and *stream*.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Tape<'a> {
-    pub raw: &'a [u8],
+pub struct Tape<'a, T> {
+    pub raw: &'a [T],
     pub pos: usize,
 }
 
-impl<'a> Index<usize> for Tape<'a> {
-    type Output = u8;
+impl<'a, T> Index<usize> for Tape<'a, T> {
+    type Output = T;
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.raw[index]
     }
 }
 
-impl<'a> Iterator for Tape<'a> {
-    type Item = u8;
+impl<'a, T: Copy> Iterator for Tape<'a, T> {
+    type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let ch = *self.raw.get(self.pos)?;
+        let elem = *self.raw.get(self.pos)?;
         self.pos += 1;
-        Some(ch)
+        Some(elem)
     }
 }
 
-impl<'a> Tape<'a> {
-    pub fn new(raw: &'a [u8]) -> Self {
+impl<'a, T: Copy> Tape<'a, T> {
+    pub fn new(raw: &'a [T]) -> Self {
         Self { raw, pos: 0 }
     }
 
-    /// Returns the **current** character, if exists, before incrementing the current position.
+    #[inline(always)]
+    pub fn slice(&self, range: Range<usize>) -> &'a [T] {
+        &self.raw[range]
+    }
+
+    /// Returns the **current** element, if exists, before incrementing the current position.
     ///
     /// This function is primarily used for iteration.
     /// If used for iteration, the current position may be modified concurrently.
     #[inline(always)]
-    pub fn next(&mut self) -> Option<&u8> {
-        let ch = self.raw.get(self.pos);
+    pub fn next(&mut self) -> Option<T> {
+        let elem = self.raw.get(self.pos);
         self.pos += 1;
-        ch
+        elem.map(|e| *e)
     }
 
-    /// Advances the current position by 1 character.
+    /// Advances the current position by 1 element.
     #[inline(always)]
     pub fn adv(&mut self) {
         self.pos += 1;
     }
 
-    /// Decrements the current position by 1 character.
+    /// Decrements the current position by 1 element.
     #[inline(always)]
     pub fn dec(&mut self) {
         self.pos -= 1;
     }
 
-    /// Returns the current character, or `None` if `pos` is out of bounds.
+    /// Returns the current element, or `None` if `pos` is out of bounds.
     #[must_use]
     #[inline(always)]
-    pub const fn cur(&self) -> Option<u8> {
+    pub const fn cur(&self) -> Option<T> {
         if self.pos < self.raw.len() {
             Some(self.raw[self.pos])
         } else {
@@ -100,10 +107,10 @@ impl<'a> Tape<'a> {
         }
     }
 
-    /// Returns the character at `pos + 1`, or `None` if that position is out of bounds.
+    /// Returns the element at `pos + 1`, or `None` if that position is out of bounds.
     #[must_use]
     #[inline(always)]
-    pub const fn peek(&self) -> Option<u8> {
+    pub const fn peek(&self) -> Option<T> {
         let pos = self.pos + 1;
         if pos < self.raw.len() {
             Some(self.raw[pos])
@@ -112,10 +119,10 @@ impl<'a> Tape<'a> {
         }
     }
 
-    /// Returns the character at `pos - 1`, or `None` if that position is out of bounds.
+    /// Returns the element at `pos - 1`, or `None` if that position is out of bounds.
     #[must_use]
     #[inline(always)]
-    pub const fn peek_back(&self) -> Option<u8> {
+    pub const fn peek_back(&self) -> Option<T> {
         let pos = self.pos - 1;
         if pos < self.raw.len() {
             Some(self.raw[pos])
@@ -124,6 +131,88 @@ impl<'a> Tape<'a> {
         }
     }
 
+    /// Returns the position of the first element returning true, or `None`.
+    #[must_use]
+    #[inline]
+    pub fn poll<F>(&self, mut pred: F) -> Option<usize>
+    where
+        F: FnMut(T, usize) -> bool,
+    {
+        (self.pos..self.raw.len()).find(|&pos| pred(self.raw[pos], pos))
+    }
+
+    /// Returns the position of the last element returning true, or `None`.
+    #[must_use]
+    #[inline]
+    pub fn poll_back<F>(&self, mut pred: F) -> Option<usize>
+    where
+        F: FnMut(T, usize) -> bool,
+    {
+        (self.pos..self.raw.len())
+            .rev()
+            .find(|&pos| pred(self.raw[pos], pos))
+    }
+
+    /// Advance `pos` until `pred` returns false for the element at the
+    /// current position.
+    ///
+    /// Leaves `pos` pointing at the matching element (or at `text.len()` when none matched).
+    /// Returns the subslice iterated over.
+    #[inline]
+    pub fn consume<F>(&mut self, mut pred: F) -> &'a [T]
+    where
+        F: FnMut(T, usize) -> bool,
+    {
+        match self.poll(|ch, pos| !pred(ch, pos)) {
+            None => &self.raw[0..0],
+            Some(pos) => {
+                let res = &self.raw[self.pos..pos];
+                self.pos = pos;
+                res
+            }
+        }
+    }
+
+    /// Decrement `pos` until `pred` returns false for the element at the
+    /// current position.
+    ///
+    /// Leaves `pos` pointing at the matching element (or at `text.len()` when none matched).
+    /// Returns the subslice iterated over.
+    #[inline]
+    pub fn put_back<F>(&mut self, mut pred: F) -> &'a [T]
+    where
+        F: FnMut(T, usize) -> bool,
+    {
+        match self.poll_back(|ch, pos| !pred(ch, pos)) {
+            None => &self.raw[0..0],
+            Some(pos) => {
+                let res = &self.raw[self.pos..pos];
+                self.pos = pos;
+                res
+            }
+        }
+    }
+
+    /// Advances `pos` to the first index where `pred` is true.
+    ///
+    /// Returns `true` if found and `pos` is left pointing at the match,
+    /// or `false` and `pos` is restored to its original value.
+    #[inline]
+    pub fn seek<F>(&mut self, pred: F) -> bool
+    where
+        F: FnMut(T, usize) -> bool,
+    {
+        match self.poll(pred) {
+            None => false,
+            Some(pos) => {
+                self.pos = pos;
+                true
+            }
+        }
+    }
+}
+
+impl<'a> Tape<'a, u8> {
     /// Returns true if the character at the given position has clearance on its left side.
     #[must_use]
     #[inline]
@@ -145,28 +234,6 @@ impl<'a> Tape<'a> {
     #[inline]
     pub fn is_any_clear(&self, start: usize) -> bool {
         !self.is_l_clear(start) || self.is_r_clear(self.pos)
-    }
-
-    /// Returns the position of the first character returning true, or `None`.
-    #[must_use]
-    #[inline]
-    pub fn poll<F>(&self, mut pred: F) -> Option<usize>
-    where
-        F: FnMut(u8, usize) -> bool,
-    {
-        (self.pos..self.raw.len()).find(|&pos| pred(self.raw[pos], pos))
-    }
-
-    /// Returns the position of the last character returning true, or `None`.
-    #[must_use]
-    #[inline]
-    pub fn poll_back<F>(&self, mut pred: F) -> Option<usize>
-    where
-        F: FnMut(u8, usize) -> bool,
-    {
-        (self.pos..self.raw.len())
-            .rev()
-            .find(|&pos| pred(self.raw[pos], pos))
     }
 
     /// Returns the position of the first character returning true,
@@ -195,51 +262,6 @@ impl<'a> Tape<'a> {
         None
     }
 
-    #[inline]
-    pub fn slice(&self, range: Range<usize>) -> &'a [u8] {
-        &self.raw[range]
-    }
-
-    /// Advance `pos` until `pred` returns false for the character at the
-    /// current position.
-    ///
-    /// Leaves `pos` pointing at the matching character (or at `text.len()` when none matched).
-    /// Returns the subslice iterated over.
-    #[inline]
-    pub fn consume<F>(&mut self, mut pred: F) -> &'a [u8]
-    where
-        F: FnMut(u8, usize) -> bool,
-    {
-        match self.poll(|ch, pos| !pred(ch, pos)) {
-            None => &self.raw[0..0],
-            Some(pos) => {
-                let res = &self.raw[self.pos..pos];
-                self.pos = pos;
-                res
-            }
-        }
-    }
-
-    /// Decrement `pos` until `pred` returns false for the character at the
-    /// current position.
-    ///
-    /// Leaves `pos` pointing at the matching character (or at `text.len()` when none matched).
-    /// Returns the subslice iterated over.
-    #[inline]
-    pub fn put_back<F>(&mut self, mut pred: F) -> &'a [u8]
-    where
-        F: FnMut(u8, usize) -> bool,
-    {
-        match self.poll_back(|ch, pos| !pred(ch, pos)) {
-            None => &self.raw[0..0],
-            Some(pos) => {
-                let res = &self.raw[self.pos..pos];
-                self.pos = pos;
-                res
-            }
-        }
-    }
-
     /// Advances `pos` until `pred` returns false for the character at the
     /// current position, respecting paragraph spacing rules.
     ///
@@ -264,25 +286,6 @@ impl<'a> Tape<'a> {
     ///
     /// Returns `true` if found and `pos` is left pointing at the match,
     /// or `false` and `pos` is restored to its original value.
-    #[inline]
-    pub fn seek<F>(&mut self, pred: F) -> bool
-    where
-        F: FnMut(u8, usize) -> bool,
-    {
-        match self.poll(pred) {
-            None => false,
-            Some(pos) => {
-                self.pos = pos;
-                true
-            }
-        }
-    }
-
-    /// Advances `pos` to the first index where `pred` is true.
-    ///
-    /// Returns `true` if found and `pos` is left pointing at the match,
-    /// or `false` and `pos` is restored to its original value.
-    ///
     ///
     /// Optimized for single byte search using SIMD.
     #[inline]

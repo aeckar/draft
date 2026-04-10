@@ -155,7 +155,7 @@ impl<'a> DataFile<'a> {
         }
     }
 
-    fn parse_any(&self, tape: &mut Tape<'a>) -> Result<DataValue, DataError> {
+    fn parse_any(&self, tape: &mut Tape<'a,u8>) -> Result<DataValue, DataError> {
         use lexical_core::format;
         use lexical_core::parse_float_options as options;
         const NUM_FMT: u128 = format::STANDARD;
@@ -233,7 +233,7 @@ impl<'a> DataFile<'a> {
         }
     }
 
-    fn parse_tag(&self, tape: &mut Tape<'a>) -> Result<String, DataError> {
+    fn parse_tag(&self, tape: &mut Tape<'a,u8>) -> Result<String, DataError> {
         let tag = tape.consume(|ch, _| ch.is_file_key_part());
         let tag = &tag[..tag.len() - 1]; // safe; first character already seen
         if tape.cur() != Some(b'{') {
@@ -244,7 +244,7 @@ impl<'a> DataFile<'a> {
         Ok(str::from_utf8(tag)?.to_string())
     }
 
-    fn parse_obj(&self, tape: &mut Tape<'a>, tag: String) -> Result<DataValue, DataError> {
+    fn parse_obj(&self, tape: &mut Tape<'a,u8>, tag: String) -> Result<DataValue, DataError> {
         tape.adv(); // skip '.'
         if tape.cur() != Some(b'{') {
             // should not be checked beforehand
@@ -321,7 +321,7 @@ impl<'a> DataFile<'a> {
         Ok(DataValue::Object { tag, map })
     }
 
-    fn parse_list(&self, tape: &mut Tape<'a>) -> Result<DataValue, DataError> {
+    fn parse_list(&self, tape: &mut Tape<'a,u8>) -> Result<DataValue, DataError> {
         let mut items = vec![];
         loop {
             tape.consume(|ch, _| ch.is_file_ws() || ch == b'\n');
