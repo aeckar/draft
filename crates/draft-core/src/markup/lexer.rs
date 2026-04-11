@@ -1,7 +1,7 @@
 use simdutf8::basic::{self, Utf8Error};
 use thiserror::Error;
 
-use crate::markup::vocab::{CheckboxType, InlineFormat, Numbering, Token, TokenSpec};
+use crate::markup::vocab::{CheckboxType, InlineFormat, Numbering, Token, TokenSpan};
 use crate::prelude::*;
 use crate::tape::Tape;
 
@@ -38,7 +38,7 @@ pub enum LexerError {
 /// Encapsulates mutable state shared between different handlers during Pass 1.
 struct VirtualLexer<'a> {
     /// Virtual (non-plaintext) tokens.
-    tokens: Vec<Token<'a>>,
+    tokens: Vec<TokenSpan<'a>>,
 
     /// The number of spaces used to distinguish between two different paragraphs.
     ///
@@ -69,16 +69,17 @@ impl<'a> VirtualLexer<'a> {
     /// Pushes the token nside the input between the start and end indices.
     /// The end index is exclusive.   
     #[inline]
-    fn emit(&mut self, spec: TokenSpec<'a>, start: usize, end: usize) {
-        self.tokens.push(Token::new(spec, start, end));
+    fn emit(&mut self, token: Token<'a>, start: usize, end: usize) {
+        self.tokens.push(TokenSpan::new(token, start, end));
     }
 
     /// Pushes the token whose first character is at the current position
     /// and has the given length.
     //do not return tape for convenience, as `pos` might need to be adjusted before exiting handler.
     #[inline]
-    fn emit_inplace(&mut self, tape: Tape<'a, u8>, spec: TokenSpec<'a>, len: usize) {
-        self.tokens.push(Token::new(spec, tape.pos, tape.pos + len));
+    fn emit_inplace(&mut self, tape: Tape<'a, u8>, token: Token<'a>, len: usize) {
+        self.tokens
+            .push(TokenSpan::new(token, tape.pos, tape.pos + len));
     }
 
     /// Attempts to emit a token if the character cluster
@@ -92,10 +93,10 @@ impl<'a> VirtualLexer<'a> {
     #[must_use]
     fn handle_pair(&mut self, mut tape: Tape<'a, u8>, mask: u8) -> Option<Tape<'a, u8>> {
         const BOLD_ITALIC_MASK: u8 = InlineFormat::BOLD_FLAG | InlineFormat::ITALIC_FLAG;
-        const BOLD_TY: TokenSpec<'static> = TokenSpec::InlineFormat {
+        const BOLD_TY: Token<'static> = Token::InlineFormat {
             ty: InlineFormat::Bold,
         };
-        const ITALIC_TY: TokenSpec<'static> = TokenSpec::InlineFormat {
+        const ITALIC_TY: Token<'static> = Token::InlineFormat {
             ty: InlineFormat::Italic,
         };
         let start = tape.pos;
@@ -115,11 +116,11 @@ impl<'a> VirtualLexer<'a> {
             // unsorted tokens don't matter since tokens are sorted after Pass 1
             if (mask & open_mask).ilog2() == 1 {
                 // basic pair
-                let spec = TokenSpec::InlineFormat {
+                let token = Token::InlineFormat {
                     ty: InlineFormat::from_flag(open_mask),
                 };
-                self.emit(spec, open_pos, open_pos + len);
-                self.emit_inplace(tape, spec, open_len);
+                self.emit(token, open_pos, open_pos + len);
+                self.emit_inplace(tape, token, open_len);
                 tape.pos += open_len;
                 // if mask == BOLD_ITALIC_MASK: stop at next format marker appended to this cluster
             } else if mask == BOLD_ITALIC_MASK && open_mask == BOLD_ITALIC_MASK {
@@ -159,7 +160,7 @@ impl<'a> VirtualLexer<'a> {
         let start = tape.pos;
         if tape.is_at(&[quote; 2]) {
             // single-line shorthand
-            self.emit_inplace(tape, TokenSpec::LineQuoteMarker, 2);
+            self.emit_inplace(tape, Token::LineQuoteMarker, 2);
             self.pgraph_spacing = 1;
             tape.pos += 2; // skip over `""`/`''`
             return Some(tape);
@@ -170,8 +171,8 @@ impl<'a> VirtualLexer<'a> {
             if let Some(&(double, open_pos)) = self.open_quotes.last()
                 && double == (quote == b'"')
             {
-                self.emit(TokenSpec::BlockQuoteOpen, open_pos, open_pos + 3);
-                self.emit_inplace(tape, TokenSpec::BlockQuoteClose, 3);
+                self.emit(Token::BlockQuoteOpen, open_pos, open_pos + 3);
+                self.emit_inplace(tape, Token::BlockQuoteClose, 3);
                 self.open_quotes.pop();
                 return Some(tape);
             }
@@ -194,9 +195,9 @@ impl<'a> VirtualLexer<'a> {
             ch == b']' && (next == b'(' || next == b'[')
         })?;
         if tape.peek_back() == Some(b'!') {
-            self.emit(TokenSpec::EmbedMarker, tape.pos - 1, tape.pos + 1);
+            self.emit(Token::EmbedMarker, tape.pos - 1, tape.pos + 1);
         } else {
-            self.emit_inplace(tape, TokenSpec::LinkMarker, 1);
+            self.emit_inplace(tape, Token::LinkMarker, 1);
         }
         self.in_alt_text = true;
         Some(tape)
@@ -224,13 +225,9 @@ impl<'a> VirtualLexer<'a> {
             return None;
         }
         if stop == b']' {
-            self.emit(
-                TokenSpec::LinkAliasBody { alias: body },
-                start,
-                tape.pos + 1,
-            );
+            self.emit(Token::LinkAliasBody { alias: body }, start, tape.pos + 1);
         } else {
-            self.emit(TokenSpec::LinkBody { href: body }, start, tape.pos + 1);
+            self.emit(Token::LinkBody { href: body }, start, tape.pos + 1);
         }
         Some(tape)
     }
@@ -241,7 +238,7 @@ impl<'a> VirtualLexer<'a> {
         if tape.is_cur_prefix() {
             self.emit_inplace(
                 tape,
-                TokenSpec::NumberedItemMarker {
+                Token::NumberedItemMarker {
                     depth: tape.count_indent(),
                     ty: Numbering::Continuation,
                 },
@@ -255,7 +252,7 @@ impl<'a> VirtualLexer<'a> {
             return None;
         }
         self.emit(
-            TokenSpec::NumberedItemMarker {
+            Token::NumberedItemMarker {
                 depth: tape.count_indent(),
                 ty: Numbering::from_marker(prev.unwrap())?,
             },
@@ -278,7 +275,7 @@ impl<'a> VirtualLexer<'a> {
             }
             self.emit_inplace(
                 tape,
-                TokenSpec::Checkbox {
+                Token::Checkbox {
                     depth: tape.count_indent(),
                     ty: CheckboxType::from_marker(tape[tape.pos])?,
                 },
@@ -295,14 +292,14 @@ impl<'a> VirtualLexer<'a> {
             tape.pos += 2;
             let tail = tape.consume(|ch, _| ch != b'\n');
             if tail.iter().all(|ch| ch.is_file_ws()) {
-                self.emit_inplace(tape, TokenSpec::HorizontalRule, 3);
+                self.emit_inplace(tape, Token::HorizontalRule, 3);
                 tape.dec();
                 return Some(tape); // stop at last '-'
             }
         }
         self.emit_inplace(
             tape,
-            TokenSpec::ListItemMarker {
+            Token::ListItemMarker {
                 depth: tape.count_indent(),
             },
             1,
@@ -320,10 +317,10 @@ impl<'a> VirtualLexer<'a> {
         let start = tape.pos;
         let marker = tape.consume_in_pgraph(1, |ch, _| ch == b'=');
         let depth = marker.len();
-        if depth > TokenSpec::HEADING_MAX {
+        if depth > Token::HEADING_MAX {
             return Some(tape); // treat as text, but skip next few '='
         }
-        self.emit(TokenSpec::Heading { depth: depth as u8 }, start, tape.pos);
+        self.emit(Token::Heading { depth: depth as u8 }, start, tape.pos);
         self.pgraph_spacing = 1;
         tape.dec();
         Some(tape) // stop at final '='
@@ -350,7 +347,7 @@ impl<'a> VirtualLexer<'a> {
             }
 
             self.emit(
-                TokenSpec::MathBlock {
+                Token::MathBlock {
                     body: &tape.slice(body_start..tape.pos),
                 },
                 start,
@@ -365,8 +362,8 @@ impl<'a> VirtualLexer<'a> {
             // failed lookahead
             return None; // stop at '$'
         }
-        self.tokens.push(Token::new(
-            TokenSpec::InlineMath {
+        self.tokens.push(TokenSpan::new(
+            Token::InlineMath {
                 body: &tape.slice(start + 1..tape.pos),
             },
             start,
@@ -392,7 +389,7 @@ impl<'a> VirtualLexer<'a> {
                 return None;
             }
             self.emit(
-                TokenSpec::CodeBlock {
+                Token::CodeBlock {
                     body: &tape.slice(body_start..tape.pos),
                     lang: lang.trim_file_ws(),
                 },
@@ -409,7 +406,7 @@ impl<'a> VirtualLexer<'a> {
             }
             tape.adv(); // skip over first '`' of closer
             self.emit(
-                TokenSpec::InlineRawCode {
+                Token::InlineRawCode {
                     body: &tape.slice(start + 2..tape.pos),
                 },
                 start,
@@ -421,8 +418,8 @@ impl<'a> VirtualLexer<'a> {
             // failed lookahead
             return None; // stop at '`'
         }
-        self.tokens.push(Token::new(
-            TokenSpec::InlineCode {
+        self.tokens.push(TokenSpan::new(
+            Token::InlineCode {
                 body: &tape.slice(start + 1..tape.pos),
             },
             start,
@@ -465,8 +462,8 @@ impl<'a> VirtualLexer<'a> {
             // treat as incomplete macro
             return Some(tape); // stop at the first non-WS character after the macro name
         }
-        self.tokens.push(Token::new(
-            TokenSpec::MacroHandle { name },
+        self.tokens.push(TokenSpan::new(
+            Token::MacroHandle { name },
             start,
             start + name.len() + 1,
         ));
@@ -477,7 +474,7 @@ impl<'a> VirtualLexer<'a> {
             }
             tape.adv(); // skip past ']'
             self.emit(
-                TokenSpec::MacroArgs {
+                Token::MacroArgs {
                     body: &tape.slice(next_pos + 1..tape.pos),
                 },
                 next_pos,
@@ -494,7 +491,7 @@ impl<'a> VirtualLexer<'a> {
             }
             tape.adv(); // skip past '}'
             self.emit(
-                TokenSpec::MacroBody {
+                Token::MacroBody {
                     body: &tape.slice(next_pos + 1..tape.pos),
                 },
                 next_pos,
@@ -522,7 +519,7 @@ pub struct Lexer<'a> {
 }
 
 impl<'a> Compile for Lexer<'a> {
-    type Output = Result<Vec<Token<'a>>, LexerError>;
+    type Output = Result<Vec<TokenSpan<'a>>, LexerError>;
 
     fn compile(self) -> Self::Output {
         if !self.static_conf.trusted_mode {
@@ -531,7 +528,7 @@ impl<'a> Compile for Lexer<'a> {
         let tokens = self.parse_virtual_tokens();
         let mut tokens = self.parse_text_tokens(tokens);
         self.convert_bad_tokens(&mut tokens);
-        tokens.pop();   // remove `Eof`
+        tokens.pop(); // remove `Eof`
         Ok(tokens)
     }
 }
@@ -552,7 +549,7 @@ impl<'a> Lexer<'a> {
     }
 
     #[must_use]
-    fn parse_virtual_tokens(&self) -> Vec<Token<'a>> {
+    fn parse_virtual_tokens(&self) -> Vec<TokenSpan<'a>> {
         let mut lex = VirtualLexer {
             in_alt_text: false,
             pgraph_spacing: 2,
@@ -571,7 +568,7 @@ impl<'a> Lexer<'a> {
                 // ordered by expected frequency
                 b'\n' => {
                     lex.pgraph_spacing = 2;
-                    lex.emit_inplace(tape, TokenSpec::Newline, 1);
+                    lex.emit_inplace(tape, Token::Newline, 1);
                     // Returning a positive result even though the cursor hasn't moved
                     // results in a negligible performance hit
                     // from copying the tape data structure.
@@ -606,12 +603,12 @@ impl<'a> Lexer<'a> {
         lex.tokens
             .sort_unstable_by(|t1, t2| t1.start.cmp(&t2.start));
         lex.tokens
-            .push(Token::new(TokenSpec::Eof, tape.raw.len(), tape.raw.len()));
+            .push(TokenSpan::new(Token::Eof, tape.raw.len(), tape.raw.len()));
         lex.tokens
     }
 
     #[must_use]
-    fn parse_text_tokens(&self, tokens: Vec<Token<'a>>) -> Vec<Token<'a>> {
+    fn parse_text_tokens(&self, tokens: Vec<TokenSpan<'a>>) -> Vec<TokenSpan<'a>> {
         let mut read = 0;
         let mut text_start = 0;
         let mut pos = 0;
@@ -621,7 +618,7 @@ impl<'a> Lexer<'a> {
             let next = &tokens[read];
             if next.start == pos {
                 if pos - text_start != 0 {
-                    result.push(Token::new(TokenSpec::Plaintext, text_start, pos));
+                    result.push(TokenSpan::new(Token::Plaintext, text_start, pos));
                 }
                 result.push(next.clone());
                 read += 1;
@@ -646,38 +643,38 @@ impl<'a> Lexer<'a> {
     ///
     /// Since macro expansion is handled outside of the compiler, we assume that all macro
     /// invocations produce text at this stage.
-    fn convert_bad_tokens(&self, tokens: &mut Vec<Token<'a>>) {
-        use TokenSpec::*;
+    fn convert_bad_tokens(&self, tokens: &mut Vec<TokenSpan<'a>>) {
+        use Token::*;
         for i in 0..tokens.len() {
-            match tokens[i].spec {
+            match tokens[i].token {
                 // access by index to satisfy borrow checker
                 Heading { .. }
                 | LineQuoteMarker
                 | ListItemMarker { .. }
                 | NumberedItemMarker { .. }
                 | Checkbox { .. }
-                    if !tokens.get(i + 1).is_some_and(|t| t.spec.is_content()) =>
+                    if !tokens.get(i + 1).is_some_and(|t| t.token.is_content()) =>
                 {
-                    tokens[i].make_raw();
+                    tokens[i].mark_plaintext();
                 }
                 LinkMarker | EmbedMarker
                     if tokens
                         .iter()
-                        .find(|t| matches!(t.spec, LinkBody { .. }) || t.spec.is_content())
-                        .is_some_and(|t| matches!(t.spec, LinkBody { .. })) =>
+                        .find(|t| matches!(t.token, LinkBody { .. }) || t.token.is_content())
+                        .is_some_and(|t| matches!(t.token, LinkBody { .. })) =>
                 {
-                    tokens[i].make_raw();
+                    tokens[i].mark_plaintext();
                 }
                 CodeBlock { body, .. } | MathBlock { body } if body.is_empty() => {
-                    tokens[i].make_raw();
+                    tokens[i].mark_plaintext();
                 }
                 BlockQuoteOpen
                     if tokens
                         .iter()
-                        .find(|t| t.spec == BlockQuoteClose || t.spec.is_content())
-                        .is_some_and(|t| t.spec.is_content()) =>
+                        .find(|t| t.token == BlockQuoteClose || t.token.is_content())
+                        .is_some_and(|t| t.token.is_content()) =>
                 {
-                    tokens[i].make_raw();
+                    tokens[i].mark_plaintext();
                 }
                 _ => {}
             }

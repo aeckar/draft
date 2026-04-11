@@ -1,9 +1,13 @@
-//! Label formatting is made a non-issue due to extensions such as TabOut.
+use std::sync::OnceLock;
 
-use enum_ordinalize::Ordinalize;
+use strum::{EnumDiscriminants, EnumIter, IntoEnumIterator};
+
+use crate::markup::parser::{Pattern, Rule, RuleKind};
+
+static INLINE_FMT_VARIANTS: OnceLock<Vec<InlineFormat>> = OnceLock::new();
 
 /// The format in which a numbered list should be displayed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Ordinalize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Numbering {
     Number,
@@ -28,7 +32,7 @@ impl Numbering {
 }
 
 /// The type of inline format marker.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Ordinalize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter)]
 #[repr(u8)]
 pub enum InlineFormat {
     Bold,
@@ -46,6 +50,7 @@ impl InlineFormat {
     pub const HIGHLIGHT_FLAG: u8 = 0b1_0000;
     const LENGTHS: [usize; 5] = [2, 1, 1, 1, 1];
 
+    /// Returns the length of the character cluster that denotes the given flag or bitmask.
     pub fn len(mask: u8) -> usize {
         if mask == Self::BOLD_FLAG | Self::ITALIC_FLAG {
             return 3;
@@ -53,8 +58,13 @@ impl InlineFormat {
         Self::LENGTHS[mask.ilog2() as usize]
     }
 
+    /// Panics if a bitmask or invalid flag is given.
     pub fn from_flag(flag: u8) -> Self {
-        Self::VARIANTS[flag.ilog2() as usize]
+        Self::variants()[flag.ilog2() as usize]
+    }
+
+    fn variants() -> &'static Vec<InlineFormat> {
+        INLINE_FMT_VARIANTS.get_or_init(|| InlineFormat::iter().collect())
     }
 }
 
@@ -84,8 +94,9 @@ impl CheckboxType {
 ///
 /// Tokens containing each respective type include boundary markers
 /// in range they represent (see comments).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TokenSpec<'a> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumDiscriminants)]
+#[strum_discriminants(name(TokenKind))]
+pub enum Token<'a> {
     // Content
     Plaintext,
     Literal { ch: u8 },                // preceded by `\`
@@ -117,7 +128,7 @@ pub enum TokenSpec<'a> {
     Eof,                                  // necessary to find bound for trailing plaintext
 }
 
-impl TokenSpec<'_> {
+impl Token<'_> {
     pub const HEADING_MAX: usize = 6;
 
     pub fn is_content(&self) -> bool {
@@ -138,19 +149,28 @@ impl TokenSpec<'_> {
     }
 }
 
+impl<'a> Pattern<'a> for TokenKind {
+    fn as_rule(&self) -> Option<&Rule<'a>> {
+        None
+    }
+    fn as_token_kind(&self) -> Option<&TokenKind> {
+        Some(self)
+    }
+}
+
 /// Represents a range of meaningful content in a markup file.
 ///
 /// The end index is exclusive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Token<'a> {
-    pub spec: TokenSpec<'a>,
+pub struct TokenSpan<'a> {
+    pub token: Token<'a>,
     pub start: usize,
     pub end: usize,
 }
 
-impl<'a> Token<'a> {
-    pub fn new(spec: TokenSpec<'a>, start: usize, end: usize) -> Self {
-        Self { spec, start, end }
+impl<'a> TokenSpan<'a> {
+    pub fn new(token: Token<'a>, start: usize, end: usize) -> Self {
+        Self { token, start, end }
     }
 
     /// Guaranteed to be nonzero.
@@ -159,7 +179,8 @@ impl<'a> Token<'a> {
         self.end - self.start
     }
 
-    pub fn make_raw(&mut self) {
-        self.spec = TokenSpec::Plaintext;
+    /// Marks this span as plaintext.
+    pub fn mark_plaintext(&mut self) {
+        self.token = Token::Plaintext;
     }
 }

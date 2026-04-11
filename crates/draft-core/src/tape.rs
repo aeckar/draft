@@ -1,8 +1,34 @@
-use std::ops::{Index, Range};
+use std::{
+    mem::discriminant,
+    ops::{Index, Range},
+};
 
 use memchr::{memchr, memchr2, memchr3, memmem};
 
-use crate::ext::CharExt;
+use crate::{
+    ext::CharExt,
+    markup::{
+        parser::{AstNode, Pattern, RuleKind},
+        vocab::{Token, TokenSpan},
+    },
+};
+
+pub type Match<'a> = Option<(AstNode<'a>, Tape<'a, TokenSpan<'a>>)>;
+
+pub trait MatchExt<'a> {
+    fn some(node: AstNode<'a>, tape: Tape<'a, TokenSpan<'a>>) -> Match<'a>;
+    fn none() -> Match<'a>;
+}
+
+impl<'a> MatchExt<'a> for Match<'a> {
+    fn some(node: AstNode<'a>, tape: Tape<'a, TokenSpan<'a>>) -> Self {
+        Some((node, tape))
+    }
+
+    fn none() -> Match<'a> {
+        None
+    }
+}
 
 /// A lightweight, zero-copy cursor over a byte slice.
 ///
@@ -61,6 +87,8 @@ impl<'a, T: Copy> Tape<'a, T> {
     ///
     /// This function is primarily used for iteration.
     /// If used for iteration, the current position may be modified concurrently.
+    ///
+    /// If the tape is exhausted, `pos` will still be incremented.
     #[inline(always)]
     pub fn next(&mut self) -> Option<T> {
         let elem = self.raw.get(self.pos);
@@ -418,4 +446,25 @@ impl<'a> Tape<'a, u8> {
         });
         tabs + (spaces / 4)
     }
+}
+
+impl<'a> Tape<'a, TokenSpan<'a>> {
+    pub fn consume(&self, query: impl Pattern<'a>, parent: RuleKind) -> Match<'a> {
+        if let Some(kind) = query.as_token_kind() {
+            match self.next() {
+                Some(span) if span.token.into() == kind => {
+                    Match::some(AstNode::leaf(span, parent), *self)
+                }
+                None => Match::none(),
+            }
+        } else {
+            query.as_rule().unwrap()(*self)
+        }
+    }
+
+    pub fn any(&self, query: impl Pattern<'a>, parent: RuleKind) -> Match<'a> {}
+
+    pub fn either(&self, query: &[impl Pattern<'a>], parent: RuleKind) -> Match<'a> {}
+
+    pub fn all(&self, query: &[impl Pattern<'a>], parent: RuleKind) -> Match<'a> {}
 }

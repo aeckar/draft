@@ -24,3 +24,5 @@ BENEFITS:
   go out of scope.
 
 We are using DATA-ORIENTED DESIGN.
+
+Speculative parsing returns tape, whereas sequential one-pass parsing modifies global tape directly. 

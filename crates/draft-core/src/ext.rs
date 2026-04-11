@@ -1,6 +1,6 @@
 use std::str::Utf8Error;
 
-use crate::markup::vocab::{Token, TokenSpec};
+use crate::markup::vocab::{Token, TokenSpan};
 
 const IS_FILE_WS: u8 = 1 << 0; // 0000_0001
 const IS_KEY_PART: u8 = 1 << 1; // 0000_0010
@@ -112,11 +112,11 @@ impl SliceExt for &[u8] {
 
 pub trait TokenExt {
     // Returns the associated `TokenSpec`, if present.
-    fn spec(&self) -> Option<TokenSpec>;
+    fn spec(&self) -> Option<Token>;
 }
 
-impl<'a> TokenExt for Option<Token<'a>> {
-    fn spec(&self) -> Option<TokenSpec> {
-        self.map(|t| t.spec)
+impl<'a> TokenExt for Option<TokenSpan<'a>> {
+    fn spec(&self) -> Option<Token> {
+        self.map(|t| t.token)
     }
 }
