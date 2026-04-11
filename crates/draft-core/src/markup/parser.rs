@@ -1,43 +1,107 @@
 use simdutf8::basic::Utf8Error;
 use thiserror::Error;
 
+use crate::markup::vocab::{Token, TokenSpec};
 use crate::prelude::*;
-use crate::markup::{lexer::MarkupLexerError, vocab::Token};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Rule {
+    Markup,
+    TopLevelElement,
+    Heading,
+    Paragraph,
+    Line,
+    LineElement,
+    Format,
+    Link,
+    Embed,
+    LinkTarget,
+    LineQuote,
+    BlockQuote,
+    List,
+    OrderedList,
+    NumberedList,
+    Checklist,
+    Macro
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NodeKind<'a> {
+    Branch {
+        /// Denotes the type of success by the primary matching logic.
+        /// - If the symbol is an alternation, is the 0-based index of the symbol chosen
+        /// - If the symbol is an option, is -2 if the argument did not match
+        /// - Otherwise, is -1
+        choice: i8,
+
+        rule: Rule, 
+    },
+    Leaf { spec: TokenSpec<'a> },
+    Root,
+}
+
+/// `end` is exclusive.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AstNode<'a> {
-    pub token: Option<Token<'a>>,
     pub parent: Option<&'a AstNode<'a>>,
     pub children: Vec<AstNode<'a>>,
+    pub start: usize,
+    pub end: usize,
+    pub kind: NodeKind<'a>,
 }
 
 impl<'a> AstNode<'a> {
-    pub fn root() -> Self {
+    /// Root nodes must have their metadata assigned after building the tree.
+    /// The returned node must exist beforehand to obtain ownership of children.
+    pub fn root(len: usize) -> Self {
         Self {
-            token: None,
+            start: 0,
+            end: len,
             parent: None,
             children: vec![],
+            kind: NodeKind::Root,
         }
     }
 
-    pub fn new(token: Token<'a>, parent: &'a AstNode<'a>) -> Self {
+    pub fn branch(rule: Rule, start: usize, end: usize, choice: i8) -> Self {
         Self {
-            token: Some(token),
-            parent: Some(parent),
+            start,
+            end,
+            parent: None,
             children: vec![],
+            kind: NodeKind::Branch { choice, rule }
         }
     }
+
+    pub fn leaf(token: Token<'a>) -> Self {
+        Self {
+            start: token.start,
+            end: token.end,
+            parent: None,
+            children: vec![],
+            kind: NodeKind::Leaf { spec: token.spec }
+        }
+    }
+
+    pub fn bind(&mut self, mut child: AstNode<'a>) {
+        child.parent = Some(self);
+        self.children.push(child)
+    }
+
 }
 
-
 #[derive(Error, Debug)]
-pub enum MarkupParserError {
-    #[error("Invalid UTF-8")]
-    InvalidUtf8(#[from] Utf8Error),
+pub enum ParserError {
+    #[error("No tokens found")]
+    MissingTokens(#[from] Utf8Error),
+
 }
 
 /// Assembles the AST according to the following grammar:
 /// ```ebnf
+/// markup := topLevelElement*
+///
 /// topLevelElement := HorizontalRule
 ///     | CodeBlock
 ///     | MathBlock
@@ -87,23 +151,87 @@ pub enum MarkupParserError {
 /// 1. Make rules for tokens that easily combine
 /// 2. Combine rules into abstract concepts
 /// 3. Seperate elements by creating rules for top-level and inline nodes
-struct MarkupParser<'a> {
+/// 
+/// Since a zero-length input is also accepted, a match (even if partial)
+/// will always be made.
+struct Parser<'a> {
     // All tokens in the markup file.
     tokens: &'a [Token<'a>],
 }
 
-impl<'a> Compile for MarkupParser<'a> {
-    type Output = Result<AstNode<'a>, MarkupLexerError>;
+impl<'a> Compile for Parser<'a> {
+    type Output = Result<AstNode<'a>, ParserError>;
 
     fn compile(self) -> Self::Output {
-        self.top_level_element(Tape::new(self.tokens))
+        self.markup(Tape::new(self.tokens))
     }
 }
 
-impl<'a> MarkupParser<'a> {
-    fn top_level_element(
-        &self,
-        mut tape: Tape<'a, Token>,
-    ) -> Result<AstNode<'a>, MarkupLexerError> {
+impl<'a> Parser<'a> {
+    fn markup(&self, mut tape: Tape<'a, Token>) -> Result<AstNode<'a>, ParserError> {
+        let mut count = 0;
+        while let self.top_level_element(tape) == Ok()
+    }
+
+    fn top_level_element(&self, mut tape: Tape<'a, Token>) -> Result<AstNode<'a>, ParserError> {}
+
+    fn heading(&self, mut tape: Tape<'a, Token>) -> Result<AstNode<'a>, ParserError> {
+        todo!()
+    }
+
+    fn paragraph(&self, mut tape: Tape<'a, Token>) -> Result<AstNode<'a>, ParserError> {
+        todo!()
+    }
+
+    fn line(&self, mut tape: Tape<'a, Token>) -> Result<AstNode<'a>, ParserError> {
+        todo!()
+    }
+
+    fn line_element(&self, mut tape: Tape<'a, Token>) -> Result<AstNode<'a>, ParserError> {
+        todo!()
+    }
+
+    fn format(&self, mut tape: Tape<'a, Token>) -> Result<AstNode<'a>, ParserError> {
+        todo!()
+    }
+
+    fn link(&self, mut tape: Tape<'a, Token>) -> Result<AstNode<'a>, ParserError> {
+        todo!()
+    }
+
+    fn embed(&self, mut tape: Tape<'a, Token>) -> Result<AstNode<'a>, ParserError> {
+        todo!()
+    }
+
+    fn link_target(&self, mut tape: Tape<'a, Token>) -> Result<AstNode<'a>, ParserError> {
+        todo!()
+    }
+
+    fn line_quote(&self, mut tape: Tape<'a, Token>) -> Result<AstNode<'a>, ParserError> {
+        todo!()
+    }
+
+    fn block_quote(&self, mut tape: Tape<'a, Token>) -> Result<AstNode<'a>, ParserError> {
+        todo!()
+    }
+
+    fn list(&self, mut tape: Tape<'a, Token>) -> Result<AstNode<'a>, ParserError> {
+        todo!()
+    }
+
+    fn ordered_list(&self, mut tape: Tape<'a, Token>) -> Result<AstNode<'a>, ParserError> {
+        todo!()
+    }
+
+    fn numbered_list(&self, mut tape: Tape<'a, Token>) -> Result<AstNode<'a>, ParserError> {
+        todo!()
+    }
+
+    fn checklist(&self, mut tape: Tape<'a, Token>) -> Result<AstNode<'a>, ParserError> {
+        todo!()
+    }
+
+    fn macro_rule(&self, mut tape: Tape<'a, Token>) -> Result<AstNode<'a>, ParserError> {
+        todo!()
     }
 }

@@ -1,9 +1,9 @@
 use simdutf8::basic::{self, Utf8Error};
 use thiserror::Error;
 
+use crate::markup::vocab::{CheckboxType, InlineFormat, Numbering, Token, TokenSpec};
 use crate::prelude::*;
 use crate::tape::Tape;
-use crate::markup::vocab::{CheckboxType, InlineFormat, Numbering, Token, TokenSpec};
 
 /// Dynamic configuration options set by the `\file` macro or by `config.mgon`.
 ///
@@ -30,7 +30,7 @@ pub struct StaticConf {
 }
 
 #[derive(Error, Debug)]
-pub enum MarkupLexerError {
+pub enum LexerError {
     #[error("Invalid UTF-8")]
     InvalidUtf8(#[from] Utf8Error),
 }
@@ -510,7 +510,7 @@ impl<'a> VirtualLexer<'a> {
 
 /// Draft markup syntax.
 #[derive(Debug)]
-pub struct MarkupLexer<'a> {
+pub struct Lexer<'a> {
     /// The input text.
     pub input: &'a [u8],
 
@@ -521,8 +521,8 @@ pub struct MarkupLexer<'a> {
     pub static_conf: &'a StaticConf,
 }
 
-impl<'a> Compile for MarkupLexer<'a> {
-    type Output = Result<Vec<Token<'a>>, MarkupLexerError>;
+impl<'a> Compile for Lexer<'a> {
+    type Output = Result<Vec<Token<'a>>, LexerError>;
 
     fn compile(self) -> Self::Output {
         if !self.static_conf.trusted_mode {
@@ -531,11 +531,12 @@ impl<'a> Compile for MarkupLexer<'a> {
         let tokens = self.parse_virtual_tokens();
         let mut tokens = self.parse_text_tokens(tokens);
         self.convert_bad_tokens(&mut tokens);
+        tokens.pop();   // remove `Eof`
         Ok(tokens)
     }
 }
 
-impl<'a> MarkupLexer<'a> {
+impl<'a> Lexer<'a> {
     pub fn new(dyn_conf: &'a DynConf, static_conf: &'a StaticConf, input: &'a [u8]) -> Self {
         Self {
             input,
@@ -545,7 +546,7 @@ impl<'a> MarkupLexer<'a> {
     }
 
     #[must_use]
-    fn validate_utf8(&self) -> Result<(), MarkupLexerError> {
+    fn validate_utf8(&self) -> Result<(), LexerError> {
         basic::from_utf8(self.input)?;
         Ok(())
     }
@@ -603,9 +604,9 @@ impl<'a> MarkupLexer<'a> {
             tape.adv();
         }
         lex.tokens
-            .push(Token::new(TokenSpec::Eof, tape.raw.len(), tape.raw.len()));
-        lex.tokens
             .sort_unstable_by(|t1, t2| t1.start.cmp(&t2.start));
+        lex.tokens
+            .push(Token::new(TokenSpec::Eof, tape.raw.len(), tape.raw.len()));
         lex.tokens
     }
 
