@@ -8,23 +8,28 @@ use memchr::{memchr, memchr2, memchr3, memmem};
 use crate::{
     ext::CharExt,
     markup::{
-        parser::{AstNode, Pattern, RuleKind},
-        vocab::{Token, TokenSpan},
+        parser_data::{AstNode, Pattern, RuleKind},
+        lexer_data::{Token, TokenKind, TokenSpan},
     },
 };
 
-pub type Match<'a> = Option<(AstNode<'a>, Tape<'a, TokenSpan<'a>>)>;
+pub type Match<'a> = Option<(Vec<AstNode<'a>>, i8,Tape<'a, TokenSpan<'a>>)>;
 
 pub trait MatchExt<'a> {
-    fn some(node: AstNode<'a>, tape: Tape<'a, TokenSpan<'a>>) -> Match<'a>;
+    fn some_leaf(child: AstNode<'a>, tape: Tape<'a, TokenSpan<'a>>) -> Match<'a>;
+    fn some_branch(children: Vec<AstNode<'a>>,choice:i8,tape:Tape<'a, TokenSpan<'a>>)->Self;
     fn none() -> Match<'a>;
 }
 
 impl<'a> MatchExt<'a> for Match<'a> {
-    fn some(node: AstNode<'a>, tape: Tape<'a, TokenSpan<'a>>) -> Self {
-        Some((node, tape))
+    fn some_leaf(child: AstNode<'a>, tape: Tape<'a, TokenSpan<'a>>) -> Self {
+        Some((vec![child], -1,tape))
     }
 
+    fn some_branch(children: Vec<AstNode<'a>>,choice:i8,tape:Tape<'a, TokenSpan<'a>>)->Self{
+        Some((children,choice,tape))
+    }
+    
     fn none() -> Match<'a> {
         None
     }
@@ -449,22 +454,52 @@ impl<'a> Tape<'a, u8> {
 }
 
 impl<'a> Tape<'a, TokenSpan<'a>> {
-    pub fn consume(&self, query: impl Pattern<'a>, parent: RuleKind) -> Match<'a> {
+    pub fn expect(&self, query: impl Pattern<'a>, parent: RuleKind) -> Match<'a> {
+        let mut tape = *self;
         if let Some(kind) = query.as_token_kind() {
-            match self.next() {
-                Some(span) if span.token.into() == kind => {
-                    Match::some(AstNode::leaf(span, parent), *self)
+            match self.peek() {
+                Some(span) if TokenKind::from(span.token) == kind => {
+                    tape.adv();
+                    Match::some_leaf(AstNode::leaf(span, parent), tape)
                 }
-                None => Match::none(),
+                _ => Match::none(),
             }
         } else {
-            query.as_rule().unwrap()(*self)
+            let rule =query.as_rule().unwrap();
+            let start = tape[tape.pos].start;
+            let (children,choice,tape) = rule(tape)?;
+            Match::some_branch(AstNode::branch(RuleKind::from(rule), parent, children, choice,start, tape[tape.pos].end), tape)
         }
     }
 
-    pub fn any(&self, query: impl Pattern<'a>, parent: RuleKind) -> Match<'a> {}
+    pub fn expect_n(&self, query: impl Pattern<'a>, parent: RuleKind) -> Match<'a> {
+        let mut tape = *self;
+        if let Some(kind) = query.as_token_kind() {
+            while let Some((children,choice,tape)) = self.expect(query, parent)
+        } else {
+            let rule = query.as_rule().unwrap();
+        }
+    }
 
-    pub fn either(&self, query: &[impl Pattern<'a>], parent: RuleKind) -> Match<'a> {}
+    pub fn expect_any(&self, query: &[impl Pattern<'a>], parent: RuleKind) -> Match<'a> {
+        let mut tape = *self;
+        for q in query {
+            if let Some(kind) = q.as_token_kind() {
+            } else {
+                let rule = q.as_rule().unwrap();
+            }
+        }
+        ""
+    }
 
-    pub fn all(&self, query: &[impl Pattern<'a>], parent: RuleKind) -> Match<'a> {}
+    pub fn expect_all(&self, query: &[impl Pattern<'a>], parent: RuleKind) -> Match<'a> {
+        let mut tape = *self;
+        for q in query {
+            if let Some(kind) = q.as_token_kind() {
+            } else {
+                let rule = q.as_rule().unwrap();
+            }
+        }
+        ""
+    }
 }

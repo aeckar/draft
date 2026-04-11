@@ -1,7 +1,7 @@
 use simdutf8::basic::{self, Utf8Error};
 use thiserror::Error;
 
-use crate::markup::vocab::{CheckboxType, InlineFormat, Numbering, Token, TokenSpan};
+use crate::markup::lexer_data::{CheckboxType, InlineFormat, Numbering, Token, TokenSpan};
 use crate::prelude::*;
 use crate::tape::Tape;
 
@@ -620,7 +620,7 @@ impl<'a> Lexer<'a> {
                 if pos - text_start != 0 {
                     result.push(TokenSpan::new(Token::Plaintext, text_start, pos));
                 }
-                result.push(next.clone());
+                result.push(*next);
                 read += 1;
                 pos += next.len();
                 text_start = pos;

@@ -2,7 +2,7 @@ use std::sync::OnceLock;
 
 use strum::{EnumDiscriminants, EnumIter, IntoEnumIterator};
 
-use crate::markup::parser::{Pattern, Rule, RuleKind};
+use crate::markup::parser_data::{Pattern, Rule, RuleKind};
 
 static INLINE_FMT_VARIANTS: OnceLock<Vec<InlineFormat>> = OnceLock::new();
 
@@ -131,7 +131,7 @@ pub enum Token<'a> {
 impl Token<'_> {
     pub const HEADING_MAX: usize = 6;
 
-    pub fn is_content(&self) -> bool {
+    pub fn is_content(self) -> bool {
         matches!(
             self,
             Self::Plaintext
@@ -150,10 +150,10 @@ impl Token<'_> {
 }
 
 impl<'a> Pattern<'a> for TokenKind {
-    fn as_rule(&self) -> Option<&Rule<'a>> {
+    fn as_rule(self) -> Option<Rule<'a>> {
         None
     }
-    fn as_token_kind(&self) -> Option<&TokenKind> {
+    fn as_token_kind(self) -> Option<TokenKind> {
         Some(self)
     }
 }

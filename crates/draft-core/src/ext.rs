@@ -1,6 +1,6 @@
 use std::str::Utf8Error;
 
-use crate::markup::vocab::{Token, TokenSpan};
+use crate::markup::lexer_data::{Token, TokenSpan};
 
 const IS_FILE_WS: u8 = 1 << 0; // 0000_0001
 const IS_KEY_PART: u8 = 1 << 1; // 0000_0010
