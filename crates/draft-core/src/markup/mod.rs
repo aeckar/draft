@@ -1,15 +1,16 @@
 mod lexer;
-mod lexer_data;
+mod lexer_utils;
 mod parser;
-mod parser_data;
+mod parser_utils;
 pub mod traversal;
+pub mod config;
 
 pub mod lex {
     pub use super::lexer::*;
-    pub use super::lexer_data::*;
+    pub use super::lexer_utils::*;
 }
 
 pub mod parse {
     pub use super::parser::*;
-    pub use super::parser_data::*;
+    pub use super::parser_utils::*;
 }

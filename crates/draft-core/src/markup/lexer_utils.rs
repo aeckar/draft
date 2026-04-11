@@ -2,7 +2,7 @@ use std::sync::OnceLock;
 
 use strum::{EnumDiscriminants, EnumIter, IntoEnumIterator};
 
-use crate::markup::parser_data::{Pattern, Rule};
+use crate::markup::{parse::RuleKind, parser_utils::Pattern};
 
 static INLINE_FMT_VARIANTS: OnceLock<Vec<InlineFormat>> = OnceLock::new();
 
@@ -125,7 +125,7 @@ pub enum Token<'a> {
     ListItemMarker { depth: u8 },
     NumberedItemMarker { depth: u8, ty: Numbering },
     AssignmentMarker { alias: &'a [u8] }, // [<key>]=<value>//todo works for citations via interpolation (`{paul}` => `[paul]=cite.{}`)
-    Eof,                                  // necessary to find bound for trailing plaintext; pruned before parsing
+    Eof, // necessary to find bound for trailing plaintext; pruned before parsing
 }
 
 impl Token<'_> {
@@ -149,11 +149,11 @@ impl Token<'_> {
     }
 }
 
-impl<'a> Pattern<'a> for TokenKind {
-    fn as_rule(self) -> Option<Rule<'a>> {
+impl Pattern for TokenKind {
+    fn of_rule(self) -> Option<RuleKind> {
         None
     }
-    fn as_token_kind(self) -> Option<TokenKind> {
+    fn of_token(self) -> Option<TokenKind> {
         Some(self)
     }
 }

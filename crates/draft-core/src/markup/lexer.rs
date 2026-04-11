@@ -1,33 +1,10 @@
 use simdutf8::basic::{self, Utf8Error};
 use thiserror::Error;
 
-use crate::markup::lexer_data::{CheckboxType, InlineFormat, Numbering, Token, TokenSpan};
+use crate::markup::config::{DynConf, StaticConf};
+use crate::markup::lexer_utils::{CheckboxType, InlineFormat, Numbering, Token, TokenSpan};
 use crate::prelude::*;
 use crate::tape::Tape;
-
-/// Dynamic configuration options set by the `\file` macro or by `config.mgon`.
-///
-/// These options can be changed at any point within a markup file by a macro.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DynConf {
-    latex_math: bool,  // `latex`
-    code_lang: String, // `code`
-}
-
-/// Static configuration options set using compiler flags or by `config.mgon`.
-///
-/// These options cannot be changed from within a markup file.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StaticConf {
-    /// If true, does not recognize inline math formatting to make writing finances easier.
-    finance_mode: bool,
-
-    /// If true, does not perform a first pass to ensure the input is valid UTF-8.
-    trusted_mode: bool,
-
-    /// If true, recognizes links without having to use link syntax.
-    infer_links: bool,
-}
 
 #[derive(Error, Debug)]
 pub enum LexerError {
