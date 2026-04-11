@@ -2,7 +2,7 @@ use std::sync::OnceLock;
 
 use strum::{EnumDiscriminants, EnumIter, IntoEnumIterator};
 
-use crate::markup::parser_data::{Pattern, Rule, RuleKind};
+use crate::markup::parser_data::{Pattern, Rule};
 
 static INLINE_FMT_VARIANTS: OnceLock<Vec<InlineFormat>> = OnceLock::new();
 
@@ -125,7 +125,7 @@ pub enum Token<'a> {
     ListItemMarker { depth: u8 },
     NumberedItemMarker { depth: u8, ty: Numbering },
     AssignmentMarker { alias: &'a [u8] }, // [<key>]=<value>//todo works for citations via interpolation (`{paul}` => `[paul]=cite.{}`)
-    Eof,                                  // necessary to find bound for trailing plaintext
+    Eof,                                  // necessary to find bound for trailing plaintext; pruned before parsing
 }
 
 impl Token<'_> {

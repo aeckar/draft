@@ -1,5 +1,5 @@
-use crate::markup::parser::Rules;
 use crate::markup::lexer_data::{Token, TokenKind, TokenSpan};
+use crate::markup::parser::Rules;
 use crate::prelude::*;
 
 /// A token or parser rule that can be matched to some slice of the
@@ -9,7 +9,7 @@ pub trait Pattern<'a> {
     fn as_rule(self) -> Option<Rule<'a>>;
 }
 
-pub type Rule<'a> = fn(tape: Tape<'a, TokenSpan<'a>>) -> Match<'a>;
+pub type Rule<'a> = fn(tape: Tape<'a, TokenSpan<'a>>) -> Option<AstNode<'a>>;
 
 impl<'a> Pattern<'a> for Rule<'a> {
     fn as_rule(self) -> Option<Rule<'a>> {
@@ -49,23 +49,23 @@ pub enum RuleKind {
 impl<'a> Into<Rule<'a>> for RuleKind {
     fn into(self) -> Rule<'a> {
         match self {
-            RuleKind::Markup => Rules::markup,
-            RuleKind::TopLevelElement => Rules::top_level_element,
-            RuleKind::Heading => Rules::heading,
-            RuleKind::Paragraph => Rules::paragraph,
-            RuleKind::Line => Rules::line,
-            RuleKind::LineElement => Rules::line_element,
-            RuleKind::Format => Rules::format,
-            RuleKind::Link => Rules::link,
-            RuleKind::Embed => Rules::embed,
-            RuleKind::LinkTarget => Rules::link_target,
-            RuleKind::LineQuote => Rules::line_quote,
-            RuleKind::BlockQuote => Rules::block_quote,
-            RuleKind::List => Rules::list,
-            RuleKind::OrderedList => Rules::ordered_list,
-            RuleKind::NumberedList => Rules::numbered_list,
-            RuleKind::Checklist => Rules::checklist,
-            RuleKind::Macro => Rules::macro_rule,
+            RuleKind::Markup => Rules::markup as Rule<'a>,
+            RuleKind::TopLevelElement => Rules::top_level_element as Rule<'a>,
+            RuleKind::Heading => Rules::heading as Rule<'a>,
+            RuleKind::Paragraph => Rules::paragraph as Rule<'a>,
+            RuleKind::Line => Rules::line as Rule<'a>,
+            RuleKind::LineElement => Rules::line_element as Rule<'a>,
+            RuleKind::Format => Rules::format as Rule<'a>,
+            RuleKind::Link => Rules::link as Rule<'a>,
+            RuleKind::Embed => Rules::embed as Rule<'a>,
+            RuleKind::LinkTarget => Rules::link_target as Rule<'a>,
+            RuleKind::LineQuote => Rules::line_quote as Rule<'a>,
+            RuleKind::BlockQuote => Rules::block_quote as Rule<'a>,
+            RuleKind::List => Rules::list as Rule<'a>,
+            RuleKind::OrderedList => Rules::ordered_list as Rule<'a>,
+            RuleKind::NumberedList => Rules::numbered_list as Rule<'a>,
+            RuleKind::Checklist => Rules::checklist as Rule<'a>,
+            RuleKind::Macro => Rules::macro_rule as Rule<'a>,
         }
     }
 }
@@ -123,7 +123,7 @@ impl<'a> AstNode<'a> {
             parent: Some(parent),
             children,
             choice,
-            kind: NodeKind::Branch { rule },
+            kind: NodeKind::Branch(rule),
         }
     }
 
@@ -134,7 +134,7 @@ impl<'a> AstNode<'a> {
             parent: Some(parent),
             children: vec![],
             choice: -1,
-            kind: NodeKind::Leaf { token: span.token },
+            kind: NodeKind::Leaf(span.token),
         }
     }
 

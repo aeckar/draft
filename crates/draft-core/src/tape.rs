@@ -1,5 +1,4 @@
 use std::{
-    mem::discriminant,
     ops::{Index, Range},
 };
 
@@ -8,8 +7,8 @@ use memchr::{memchr, memchr2, memchr3, memmem};
 use crate::{
     ext::CharExt,
     markup::{
-        parser_data::{AstNode, Pattern, RuleKind},
-        lexer_data::{Token, TokenKind, TokenSpan},
+        parse::{AstNode, Pattern, RuleKind},
+        lex::{TokenKind, TokenSpan},
     },
 };
 
