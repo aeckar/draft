@@ -2,7 +2,7 @@ use simdutf8::basic::{self, Utf8Error};
 use thiserror::Error;
 
 use crate::{
-    data::parser::DataSyntax,
+    data::parser::{DataSyntax, DataValue},
     markup::{
         config::{DynConf, StaticConf},
         lex::{CheckboxType, InlineFormat, ListItemKind, Numbering, Token, TokenSpan},
@@ -62,6 +62,7 @@ impl<'a> MarkupSyntax<'a> {
             tokens: vec![],
             open_quotes: Vec::with_capacity(2),
             open_fmts: vec![],
+            data_values: vec![],
         };
         let mut tape = Tape::new(self.input);
 
@@ -211,6 +212,8 @@ struct Scanner<'a> {
     ///
     /// The first element of each pair is whether double quotes were used.
     open_quotes: Vec<(bool, usize)>,
+
+    data_values: Vec<DataValue>,
 }
 
 /// All `handle_X` functions assume cursor is at a valid character.
@@ -431,10 +434,20 @@ impl<'a> Scanner<'a> {
         tape.consume(|ch, _| ch.is_file_ws());
         tape.next().filter(|&ch| ch == b'=')?;
         tape.consume(|ch, _| ch.is_file_ws());
-        let (value, len) = DataSyntax::new(str::from_utf8(tape.rest()).ok()?).compile().ok()?;
+        let (value, len) = DataSyntax::new(str::from_utf8(tape.rest()).ok()?)
+            .compile()
+            .ok()?;
         tape.pos += len;
-        self.emit(Token::Assignment { key, value }, start, tape.pos);
-        Some(tape)  // allow trailing tokens
+        self.emit(
+            Token::Assignment {
+                key,
+                value_idx: self.data_values.len(),
+            },
+            start,
+            tape.pos,
+        );
+        self.data_values.push(value);
+        Some(tape) // allow trailing tokens
     }
 
     /// Resolves whether a ']' character belongs to a link body, an embed body, or plain text.

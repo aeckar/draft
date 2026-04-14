@@ -216,7 +216,7 @@ impl<'a> DataSyntax<'a> {
                     })
                 } else {
                     Ok(DataValue::String(
-                        str::from_utf8(&tape[start + 1..tape.pos]).ok()?.to_owned(),
+                        str::from_utf8(&tape[start + 1..tape.pos])?.to_owned(),
                     ))
                 }
             }
@@ -230,14 +230,14 @@ impl<'a> DataSyntax<'a> {
                     })
                 } else {
                     Ok(DataValue::String(
-                        str::from_utf8(&tape[start + 1..tape.pos]).ok()?.to_owned(),
+                        str::from_utf8(&tape[start + 1..tape.pos])?.to_owned(),
                     ))
                 }
             }
             b'-' | b'+' | b'0'..=b'9' => {
                 lexical_core::parse_partial_with_options::<f64, NUM_FMT>(tape.rest(), &NUM_OPTIONS)
                     .inspect(|&(_, len)| tape.pos += len)
-                    .map(|(n, _)| DataValue::Number(n))
+                    .map(|(n, _)| DataValue::Number(unsafe { NotNan::new_unchecked(n) }))
                     .map_err(|e| DataError::InvalidNumber(e))
             }
             b';' => {
@@ -296,16 +296,17 @@ impl<'a> DataSyntax<'a> {
 
             // Get key
             let key: &'a [u8];
+            let copy = *tape;   // satisfies borrow checker
             if ch == b'"' {
                 tape.adv();
                 key = tape.consume(|ch, pos| {
-                    (ch != b'"' && ch != b'\n') || ch == b'"' && tape.get(pos - 1) == Some(&b'\\')
+                    (ch != b'"' && ch != b'\n') || ch == b'"' && copy.get(pos - 1) == Some(&b'\\')
                 });
                 tape.adv(); // skip '"'
             } else if ch == b'\'' {
                 tape.adv();
                 key = tape.consume(|ch, pos| {
-                    (ch != b'\'' && ch != b'\n') || ch == b'\'' && tape.get(pos - 1) == Some(&b'\\')
+                    (ch != b'\'' && ch != b'\n') || ch == b'\'' && copy.get(pos - 1) == Some(&b'\\')
                 });
                 tape.adv(); // skip `'`
             } else if matches!(ch, b'-' | b'$' | b'a'..=b'z' | b'A'..=b'Z') {

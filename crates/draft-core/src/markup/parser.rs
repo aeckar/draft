@@ -335,8 +335,8 @@ impl<'a> Grammar {
 
     rule!(list, |mut tape| {
         let mut children_a = vec![];
-        let node = node::new(rule::List, vec![], tape.peek()?.start, meta::None);
-        while let Some((child_a, jump)) = Self::list_item(tape, &node) {
+        let mut node = node::new(rule::List, vec![], tape.peek()?.start, meta::None);
+        while let Some((child_a, jump)) = Self::list_item(tape, &mut node) {
             children_a.push(child_a);
             tape = jump;
         }
@@ -351,7 +351,7 @@ impl<'a> Grammar {
         Some((node::branch(rule::List, vec![a], meta::None), tape))
     });
 
-    pub fn list_item(mut tape: TokenStream<'a>, parent: &AstNode<'a>) -> Result<'a> {
+    pub fn list_item(mut tape: TokenStream<'a>, parent: &mut AstNode<'a>) -> Result<'a> {
         let mut a = try_token!(tape, ListItemMarker)?;
         unpack_token!(
             a,
@@ -382,20 +382,14 @@ impl<'a> Grammar {
         } else {
             let mut pos = ListItemPos::Any;
             let prev = parent.children.last_mut().unwrap();
-            unpack_token!(
-                prev,
-                ListItemMarker {
-                    indent: prev_indent,
-                    pos: prev_pos
-                }
-            );
+            unpack_token!(prev, ListItemMarker { indent: prev_indent, .. });
             if prev_indent > indent_a {
                 pos |= ListItemPos::First;
             } else if prev_indent < indent_a {
                 unpack!(prev.meta, meta::ListItem { kind, pos });
                 prev.meta = meta::ListItem {
                     kind,
-                    pos: pos.intersect(ListItemPos::Last),
+                    pos: pos.intersection(ListItemPos::Last),
                 };
             }
             a.meta = meta::ListItem { kind: kind_a, pos };

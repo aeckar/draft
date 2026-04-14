@@ -3,10 +3,7 @@ use std::sync::OnceLock;
 use bitflags::bitflags;
 use strum::EnumDiscriminants;
 
-use crate::{
-    data::parser::DataValue,
-    markup::parse::{RuleKind, SymbolKind},
-};
+use crate::markup::parse::{RuleKind, SymbolKind};
 
 /// Unpacks a specific enum variant from a token, destructuring its fields into local variables.
 ///
@@ -213,7 +210,7 @@ pub enum Token<'a> {
     CodeBlock { body: &'a [u8], lang: &'a [u8] },
     MathBlock { body: &'a [u8] },
     ListItemMarker { indent: u8, kind: ListItemKind },
-    Assignment { key: &'a [u8], value: DataValue }, // [<key>]=<value>//todo works for citations via interpolation (`{paul}` => `[paul]=cite.{}`)
+    Assignment { key: &'a [u8], value_idx: usize }, // [<key>]=<value>//todo works for citations via interpolation (`{paul}` => `[paul]=cite.{}`)
     Eof, // necessary to find bound for trailing plaintext; pruned before parsing
 }
 
