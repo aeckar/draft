@@ -1,5 +1,7 @@
 //! todo explain x vs x_utils
 //! 
+//! todo #inline for external inline of approp funcs' (can resolve to non-block expr)
+//! 
 //! Modules should be imported internally using re-export.
 pub mod config;
 mod lexer;

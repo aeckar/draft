@@ -17,6 +17,7 @@ pub enum Numbering {
 }
 
 impl Numbering {
+    #[inline]
     pub const fn from_marker(marker: u8) -> Option<Self> {
         match marker {
             b'd' => Some(Numbering::Number),
@@ -44,14 +45,16 @@ bitflags::bitflags! {
 impl InlineFormat {
     pub const BOLD_ITALIC: u8 = Self::Bold.bits() | Self::Italic.bits();
 
-    const LENGTHS: [usize; 5] = [2, 1, 1, 1, 1];
-
     /// Returns the length of the character cluster that denotes the given flag or bitmask.
+    #[inline]
     pub const fn len(mask: u8) -> usize {
         if mask == Self::BOLD_ITALIC {
-            return 3;
+            3
+        } else if mask == Self::Bold.bits() {
+            2
+        } else {
+            1
         }
-        Self::LENGTHS[mask.ilog2() as usize]
     }
 }
 
@@ -118,6 +121,7 @@ pub enum Token<'a> {
 impl Token<'_> {
     pub const HEADING_MAX: usize = 6;
 
+    #[inline]
     pub const fn is_content(self) -> bool {
         matches!(
             self,
@@ -135,6 +139,7 @@ impl Token<'_> {
         )
     }
 
+    #[inline]
     pub fn kind(&self) -> TokenKind {
         TokenKind::from(self)
     }
@@ -160,19 +165,19 @@ pub struct TokenSpan<'a> {
 }
 
 impl<'a> TokenSpan<'a> {
-    #[inline(always)]
+    #[inline]
     pub const fn new(token: Token<'a>, start: usize, end: usize) -> Self {
         Self { token, start, end }
     }
 
     /// Guaranteed to be nonzero.
-    #[inline(always)]
+    #[inline]
     pub const fn len(&self) -> usize {
         self.end - self.start
     }
 
     /// Marks this span as plaintext.
-    #[inline(always)]
+    #[inline]
     pub const fn bind_plain(&mut self) {
         self.token = Token::Plaintext;
     }

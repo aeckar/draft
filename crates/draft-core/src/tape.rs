@@ -23,6 +23,9 @@ use crate::ext::CharExt;
 /// The name *"pos"* is used to distinguish indices in a `Tape` from other data structures.
 /// It is not guaranteed to be within the acceptable range of indices at any given point,
 /// but member functions assume so.
+/// 
+/// `#[inline(always)]` should be restricted to functions called often in the
+/// main `Scanner`/`Grammar` recursions, where the benefit of inlining is completely certain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Tape<'a, T> {
     pub raw: &'a [T],
@@ -48,12 +51,13 @@ impl<'a, T: Copy> Iterator for Tape<'a, T> {
 }
 
 impl<'a, T: Copy + PartialEq> Tape<'a, T> {
+    #[inline]
     pub const fn new(raw: &'a [T]) -> Self {
         Self { raw, pos: 0 }
     }
 
     #[inline(always)]
-    pub fn slice(&self, range: Range<usize>) -> &'a [T] {
+    pub fn slice(self, range: Range<usize>) -> &'a [T] {
         &self.raw[range]
     }
 
@@ -85,7 +89,7 @@ impl<'a, T: Copy + PartialEq> Tape<'a, T> {
     /// Returns the current element, or `None` if `pos` is out of bounds.
     #[must_use]
     #[inline(always)]
-    pub const fn cur(&self) -> Option<T> {
+    pub const fn cur(self) -> Option<T> {
         if self.pos < self.raw.len() {
             Some(self.raw[self.pos])
         } else {
@@ -96,7 +100,7 @@ impl<'a, T: Copy + PartialEq> Tape<'a, T> {
     /// Returns the element at `pos + 1`, or `None` if that position is out of bounds.
     #[must_use]
     #[inline(always)]
-    pub const fn peek(&self) -> Option<T> {
+    pub const fn peek(self) -> Option<T> {
         let pos = self.pos + 1;
         if pos < self.raw.len() {
             Some(self.raw[pos])
@@ -108,7 +112,7 @@ impl<'a, T: Copy + PartialEq> Tape<'a, T> {
     /// Returns the element at `pos - 1`, or `None` if that position is out of bounds.
     #[must_use]
     #[inline(always)]
-    pub const fn peek_back(&self) -> Option<T> {
+    pub const fn peek_back(self) -> Option<T> {
         let pos = self.pos - 1;
         if pos < self.raw.len() {
             Some(self.raw[pos])
@@ -120,7 +124,7 @@ impl<'a, T: Copy + PartialEq> Tape<'a, T> {
     /// Returns the position of the first element returning true, or `None`.
     #[must_use]
     #[inline]
-    pub fn poll<F>(&self, mut pred: F) -> Option<usize>
+    pub fn poll<F>(self, mut pred: F) -> Option<usize>
     where
         F: FnMut(T, usize) -> bool,
     {
@@ -130,7 +134,7 @@ impl<'a, T: Copy + PartialEq> Tape<'a, T> {
     /// Returns the position of the last element returning true, or `None`.
     #[must_use]
     #[inline]
-    pub fn poll_back<F>(&self, mut pred: F) -> Option<usize>
+    pub fn poll_back<F>(self, mut pred: F) -> Option<usize>
     where
         F: FnMut(T, usize) -> bool,
     {
@@ -201,7 +205,7 @@ impl<'a, T: Copy + PartialEq> Tape<'a, T> {
     /// starts with the given string.
     #[must_use]
     #[inline]
-    pub fn is_at(&self, query: &[T]) -> bool {
+    pub fn is_at(self, query: &[T]) -> bool {
         self.raw[self.pos..].starts_with(query)
     }
 }
@@ -211,14 +215,14 @@ impl<'a> Tape<'a, u8> {
     /// Returns true if the character at the given position has clearance on its left side.
     #[must_use]
     #[inline]
-    pub fn is_l_clear(&self, pos: usize) -> bool {
+    pub fn is_l_clear(self, pos: usize) -> bool {
         pos == 0 || self.raw.get(pos - 1).is_none_or(|elem| elem.is_file_ws())
     }
 
     /// Returns true if the character at the given position has clearance on its right side.
     #[must_use]
     #[inline]
-    pub fn is_r_clear(&self, pos: usize) -> bool {
+    pub fn is_r_clear(self, pos: usize) -> bool {
         self.raw.get(pos + 1).is_none_or(|elem| elem.is_file_ws())
     }
 
@@ -227,7 +231,7 @@ impl<'a> Tape<'a, u8> {
     /// (has clearance on either side).
     #[must_use]
     #[inline]
-    pub fn is_any_clear(&self, start: usize) -> bool {
+    pub fn is_any_clear(self, start: usize) -> bool {
         !self.is_l_clear(start) || self.is_r_clear(self.pos)
     }
 
@@ -235,7 +239,7 @@ impl<'a> Tape<'a, u8> {
     /// respecting paragraph spacing rules, or `None`.
     #[must_use]
     #[inline]
-    pub fn poll_in_pgraph<F>(&self, spacing: u8, mut pred: F) -> Option<usize>
+    pub fn poll_in_pgraph<F>(self, spacing: u8, mut pred: F) -> Option<usize>
     where
         F: FnMut(u8, usize) -> bool,
     {
@@ -384,7 +388,7 @@ impl<'a> Tape<'a, u8> {
     /// itself if it is a newline.
     #[must_use]
     #[inline]
-    pub fn is_cur_prefix(&self) -> bool {
+    pub fn is_cur_prefix(self) -> bool {
         self.is_prefix(self.pos)
     }
 
@@ -393,7 +397,7 @@ impl<'a> Tape<'a, u8> {
     /// itself if it is a newline.
     #[must_use]
     #[inline]
-    pub fn is_prefix(&self, pos: usize) -> bool {
+    pub fn is_prefix(self, pos: usize) -> bool {
         for i in (0..pos).rev() {
             let c = self.raw[i]; // This is safe because i < self.pos
             if c == b'\n' {
@@ -412,7 +416,8 @@ impl<'a> Tape<'a, u8> {
     ///
     /// Used to determine separation between table cells and indentation of list items.
     #[must_use]
-    pub fn count_indent(&self) -> u8 {
+    #[inline]
+    pub fn count_indent(self) -> u8 {
         let ws = &self.raw[self.poll_back(|elem, _| elem == b'\n').unwrap_or(0)..self.pos];
         let (tabs, spaces) = ws.iter().fold((0, 0), |(t, s), &elem| match elem {
             b'\t' => (t + 1, s),
@@ -420,5 +425,11 @@ impl<'a> Tape<'a, u8> {
             _ => (t, s),
         });
         tabs + (spaces / 4)
+    }
+
+    #[must_use]
+    #[inline(always)]
+    pub const fn has_next(self) -> bool {
+        self.pos >= self.raw.len()
     }
 }

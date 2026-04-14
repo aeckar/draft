@@ -60,6 +60,7 @@ pub enum NodeKind<'a> {
 }
 
 impl<'a> NodeKind<'a> {
+    #[inline]
     pub const fn token(self) -> Option<Token<'a>> {
         match self {
             Self::Token(token) => Some(token),
@@ -103,6 +104,7 @@ pub enum ListItemKind {
 
 impl ListItemKind {
     /// Returns true if both kinds of list items can reside within the same list.
+    #[inline]
     pub fn is_sibling(self, other: Self) -> bool {
         if self == Self::Bullet {
             return other == Self::Bullet;
@@ -113,6 +115,7 @@ impl ListItemKind {
         return other.is_checkbox();
     }
 
+    #[inline]
     pub const fn is_numbering(self) -> bool {
         matches!(
             self,
@@ -120,10 +123,12 @@ impl ListItemKind {
         )
     }
 
+    #[inline]
     pub const fn is_checkbox(self) -> bool {
         matches!(self, Self::EmptyBox | Self::FilledBox | Self::ToggleBox)
     }
 
+    #[inline]
     pub fn from_token(token: Token) -> Self {
         match token {
             Token::ListItemMarker { .. } => Self::Bullet,
@@ -144,6 +149,7 @@ impl ListItemKind {
     }
 
     /// Returns the open tag, or panics if this is a continuation.
+    #[inline]
     pub const fn open_tag(self) -> &'static str {
         match self {
             Self::Bullet => "ul class='dt-bullet'",
@@ -159,6 +165,7 @@ impl ListItemKind {
     }
 
     /// Returns the open tag, or panics if this is a continuation.
+    #[inline]
     pub const fn close_tag(self) -> &'static str {
         match self {
             Self::Bullet => "ul",
@@ -244,6 +251,7 @@ impl<'a> AstNode<'a> {
     /// Returns a token leaf node using the next token span in the tape.
     ///
     /// Panics if `tape` is exhausted.
+    #[inline]
     pub fn token(span: TokenSpan<'a>) -> Self {
         Self {
             start: span.start,
@@ -274,10 +282,12 @@ impl<'a> AstNode<'a> {
         })
     }
 
+    #[inline]
     pub fn is_leaf(&self) -> bool {
         matches!(self.kind, NodeKind::Token(_))
     }
 
+    #[inline]
     pub fn is_branch(&self) -> bool {
         matches!(self.kind, NodeKind::Rule(_))
     }
