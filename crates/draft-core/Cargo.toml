@@ -10,14 +10,15 @@ repository = "https://github.com/aeckar/draft"
 [dependencies]
 thiserror = "2.0.18"
 pastey = "0.2.1"
-regex = "1.12.3"
 derive_more = { version = "2.1.1", features = ["deref"] }
+
+# compilation
+mime_guess = "2.0.5"
+video-url-validator = "0.1.0"
+html-escape = "0.2.13"
 
 # list discriminants of `Token` and `InlineFormat`
 strum = { version = "0.28.0", features = ["derive"] }
-
-# arena allocator for intermediate results of AST visitor todo
-bumpalo = "3.20.2"
 
 # vectorized UTF-8 validation for file input
 simdutf8 = "0.1.5"
@@ -41,6 +42,7 @@ lexical-core = { version = "1.0.6", default-features = false, features = [
     "write-floats",
 ] }
 
+#todo
 # expose serialization hooks for object notation
 # JSON (de)serialization support
 serde = { version = "1.0", features = ["derive"] }
@@ -51,6 +53,8 @@ serde_json = "1.0.149"
 # compile = []
 # format = []
 # transpile = ["markdown-parser-crate"] # Only pull in Markdown deps if needed
+# macros = 
+# serde = 
 
 [lib]
 path = "src/lib.rs"

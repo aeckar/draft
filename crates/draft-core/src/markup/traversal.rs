@@ -1,7 +1,6 @@
 use std::sync::OnceLock;
 
 use pastey::paste;
-use regex::Regex;
 
 use crate::markup::{
     lex::{InlineFormat as fmt, Token},
@@ -64,8 +63,8 @@ macro_rules! emit {
 }
 
 macro_rules! unpack {
-    ($instance:expr, $variant:path { $($field:ident),* }) => {
-        let $variant { $($field),* , .. } = $instance.kind.token().unwrap() else {
+    ($instance:expr, $variant:ident { $($field:ident),* }) => {
+        let Token::$variant { $($field),* , .. } = $instance.kind.token().unwrap() else {
             panic!("Unpack failed: Expected {}", stringify!($variant));
         };
     };
@@ -183,23 +182,35 @@ impl<'a> AstVisitor<'a> for AstToHtml {
         model.in_pgraph = false;
     });
 
+    visitor!(newline, |model: &mut AstToHtml, node| {
+        emit!(model, " ");
+    });
+
     visitor!(list, |model: &mut AstToHtml, node| {
-        for child in node.children.iter() {
-            let marker = child[0];
+        for child in node.iter() {
+            let marker = &child[0];
+            let kinds = vec![];
+            let kind = ListItemKind::new(marker.kind.as_token_kind().unwrap());
+            loop {
+                if kinds.is_empty() {
+
+                }
+            }
+            
         }
     });
 
     visitor!(markup, |model: &mut AstToHtml, node| {});
 
     visitor!(heading, |model: &mut AstToHtml, node| {
-        unpack!(node[0], Token::HeadingMarker { depth });
+        unpack!(node[0], HeadingMarker { depth });
         emit!(model, "<h{depth}>");
         model.visit_line(&node[1]);
         emit!(model, "</h{depth}>");
     });
 
     visitor!(format, |model: &mut AstToHtml, node| {
-        unpack!(node[0], Token::InlineFormat { ty });
+        unpack!(node[0], InlineFormat { ty });
         match ty {
             fmt::Bold => {
                 emit!(model, "<b class='dt-bold'>");

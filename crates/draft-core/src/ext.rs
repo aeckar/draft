@@ -52,7 +52,7 @@ pub trait CharExt {
     ///
     /// Letters, digits, dashes, dots, and dollar signs are accepted.
     /// Kebab case is used, with dots used to denote scope and dollar signs
-    /// used to denote special keys. Keys must start with a letter, dollar sign, or dash.
+    /// used to denote special keys. Keys must start with a letter or dollar sign.
     fn is_file_key_part(&self) -> bool;
 }
 

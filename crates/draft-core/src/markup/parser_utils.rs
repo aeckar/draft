@@ -53,7 +53,7 @@ pub enum NodeKind<'a> {
 }
 
 impl<'a> NodeKind<'a> {
-    pub fn token(self) -> Option<Token<'a>> {
+    pub const fn token(self) -> Option<Token<'a>> {
         match self {
             Self::Token(token) => Some(token),
             _ => None,

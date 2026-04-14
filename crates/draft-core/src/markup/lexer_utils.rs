@@ -19,7 +19,7 @@ pub enum Numbering {
 }
 
 impl Numbering {
-    pub fn from_marker(marker: u8) -> Option<Self> {
+    pub const fn from_marker(marker: u8) -> Option<Self> {
         match marker {
             b'd' => Some(Numbering::Number),
             b'a' => Some(Numbering::Lower),
@@ -53,7 +53,7 @@ impl InlineFormat {
     const LENGTHS: [usize; 5] = [2, 1, 1, 1, 1];
 
     /// Returns the length of the character cluster that denotes the given flag or bitmask.
-    pub fn len(mask: u8) -> usize {
+    pub const fn len(mask: u8) -> usize {
         if mask == Self::BOLD_FLAG | Self::ITALIC_FLAG {
             return 3;
         }
@@ -75,16 +75,16 @@ impl InlineFormat {
 pub enum CheckboxType {
     Filled,
     Empty,
-    Interactable,
+    Toggle,
 }
 
 impl CheckboxType {
     /// Returns the checkbox type according to the
-    pub fn from_marker(marker: u8) -> Option<Self> {
+    pub const fn from_marker(marker: u8) -> Option<Self> {
         match marker {
             b'x' => Some(CheckboxType::Filled),
             b'o' => Some(CheckboxType::Empty),
-            b'?' => Some(CheckboxType::Interactable),
+            b'?' => Some(CheckboxType::Toggle),
             _ => None,
         }
     }
@@ -123,9 +123,9 @@ pub enum Token<'a> {
     HeadingMarker { depth: u8 },
     CodeBlock { body: &'a [u8], lang: &'a [u8] },
     MathBlock { body: &'a [u8] },
-    Checkbox { depth: u8, ty: CheckboxType },
-    ListItemMarker { depth: u8 },
-    NumberedItemMarker { depth: u8, ty: Numbering },
+    Checkbox { indent: u8, ty: CheckboxType },
+    ListItemMarker { indent: u8 },
+    NumberedItemMarker { indent: u8, ty: Numbering },
     AssignmentMarker { alias: &'a [u8] }, // [<key>]=<value>//todo works for citations via interpolation (`{paul}` => `[paul]=cite.{}`)
     Eof, // necessary to find bound for trailing plaintext; pruned before parsing
 }
@@ -133,7 +133,7 @@ pub enum Token<'a> {
 impl Token<'_> {
     pub const HEADING_MAX: usize = 6;
 
-    pub fn is_content(self) -> bool {
+    pub const fn is_content(self) -> bool {
         matches!(
             self,
             Self::Plaintext
@@ -175,18 +175,18 @@ pub struct TokenSpan<'a> {
 }
 
 impl<'a> TokenSpan<'a> {
-    pub fn new(token: Token<'a>, start: usize, end: usize) -> Self {
+    pub const fn new(token: Token<'a>, start: usize, end: usize) -> Self {
         Self { token, start, end }
     }
 
     /// Guaranteed to be nonzero.
     #[inline(always)]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.end - self.start
     }
 
     /// Marks this span as plaintext.
-    pub fn bind_plain(&mut self) {
+    pub const fn bind_plain(&mut self) {
         self.token = Token::Plaintext;
     }
 }

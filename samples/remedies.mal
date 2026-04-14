@@ -112,3 +112,6 @@ in editor: use `>` as shorthand for "insert this"
 
 
 Updraft is company/app name, Draft is markup/cli name
+
+always use Self:: in impl
+order based on likelihood

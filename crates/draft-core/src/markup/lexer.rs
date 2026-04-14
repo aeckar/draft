@@ -276,7 +276,7 @@ impl<'a> VirtualLexer<'a> {
             self.emit_inplace(
                 tape,
                 Token::NumberedItemMarker {
-                    depth: tape.count_indent(),
+                    indent: tape.count_indent(),
                     ty: Numbering::Continuation,
                 },
                 1,
@@ -290,7 +290,7 @@ impl<'a> VirtualLexer<'a> {
         }
         self.emit(
             Token::NumberedItemMarker {
-                depth: tape.count_indent(),
+                indent: tape.count_indent(),
                 ty: Numbering::from_marker(prev.unwrap())?,
             },
             tape.pos - 1,
@@ -317,7 +317,7 @@ impl<'a> VirtualLexer<'a> {
             self.emit_inplace(
                 tape,
                 Token::Checkbox {
-                    depth: tape.count_indent(),
+                    indent: tape.count_indent(),
                     ty: CheckboxType::from_marker(marker)?,
                 },
                 2,
@@ -338,7 +338,7 @@ impl<'a> VirtualLexer<'a> {
         self.emit_inplace(
             tape,
             Token::ListItemMarker {
-                depth: tape.count_indent(),
+                indent: tape.count_indent(),
             },
             1,
         );
@@ -573,7 +573,7 @@ impl<'a> Compile for Lexer<'a> {
 }
 
 impl<'a> Lexer<'a> {
-    pub fn new(dyn_conf: &'a DynConf, static_conf: &'a StaticConf, input: &'a [u8]) -> Self {
+    pub const fn new(dyn_conf: &'a DynConf, static_conf: &'a StaticConf, input: &'a [u8]) -> Self {
         Self {
             input,
             dyn_conf,

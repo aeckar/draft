@@ -147,6 +147,7 @@ impl<'a> Compile for DataFile<'a> {
     }
 }
 
+// todo use string slices
 /// All `parse_X` functions assume cursor is at a valid character.
 impl<'a> DataFile<'a> {
     pub fn new(input: &'a str) -> Self {
@@ -186,7 +187,7 @@ impl<'a> DataFile<'a> {
 
         let ch = tape.cur().unwrap();
         match ch {
-            b'-' | b'$' | b'a'..=b'z' | b'A'..=b'Z' => {
+            b'$' | b'a'..=b'z' | b'A'..=b'Z' => {
                 let tag = self.parse_tag(tape)?;
                 self.parse_obj(tape, tag)
             }
@@ -218,7 +219,7 @@ impl<'a> DataFile<'a> {
                     ))
                 }
             }
-            b'0'..=b'9' => lexical_core::parse_partial_with_options::<f64, NUM_FMT>(
+            b'-' | b'+' | b'0'..=b'9' => lexical_core::parse_partial_with_options::<f64, NUM_FMT>(
                 tape.slice(tape.pos..tape.raw.len()),
                 &NUM_OPTIONS,
             )

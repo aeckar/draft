@@ -3,7 +3,8 @@ mod lexer;
 mod lexer_utils;
 mod parser;
 mod parser_utils;
-pub mod traversal;
+mod traversal;
+mod traversal_utils;
 
 pub mod lex {
     pub use super::lexer::*;
@@ -13,4 +14,9 @@ pub mod lex {
 pub mod parse {
     pub use super::parser::*;
     pub use super::parser_utils::*;
+}
+
+pub mod visit {
+    pub use super::traversal::*;
+    pub use super::traversal_utils::*;
 }

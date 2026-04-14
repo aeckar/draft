@@ -48,7 +48,7 @@ impl<'a, T: Copy> Iterator for Tape<'a, T> {
 }
 
 impl<'a, T: Copy + PartialEq> Tape<'a, T> {
-    pub fn new(raw: &'a [T]) -> Self {
+    pub const fn new(raw: &'a [T]) -> Self {
         Self { raw, pos: 0 }
     }
 
@@ -72,13 +72,13 @@ impl<'a, T: Copy + PartialEq> Tape<'a, T> {
 
     /// Advances the current position by 1 element.
     #[inline(always)]
-    pub fn adv(&mut self) {
+    pub const fn adv(&mut self) {
         self.pos += 1;
     }
 
     /// Decrements the current position by 1 element.
     #[inline(always)]
-    pub fn dec(&mut self) {
+    pub const fn dec(&mut self) {
         self.pos -= 1;
     }
 
