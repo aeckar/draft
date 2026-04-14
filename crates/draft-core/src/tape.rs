@@ -1,5 +1,3 @@
-use std::ops::{Index, Range, RangeTo};
-
 use derive_more::Deref;
 use memchr::{memchr, memchr2, memchr3, memmem};
 

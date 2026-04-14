@@ -1,41 +1,13 @@
-use std::sync::OnceLock;
-
-use indoc::formatdoc;
 use pastey::paste;
 
-use crate::{markup::{
-    scan::{InlineFormat},
-    parse::{AstNode, SymbolKind},
-}, unpack_token};
-
-// todo move all this to utils
-
-static YOUTUBE_LINK: OnceLock<Regex> = OnceLock::new();
-static MEDIA_LINK: OnceLock<Regex> = OnceLock::new();
-
-/// Returns the regex for a YouTube video link.
-fn get_yt_link() -> &'static Regex {
-    YOUTUBE_LINK.get_or_init(|| {
-        Regex::new(r"(?:https?://)?(?:www\.)?(?:youtube\.com/watch\?.*v=|youtu\.be/)([\w-]{11})(?:[&?]\S*)?")
-        .expect("Invalid YouTube video regex")
-    })
-}
-
-/// Returns the regex for a media file link.
-fn get_media_link() -> &'static Regex {
-    MEDIA_LINK.get_or_init(|| {
-        Regex::new(r"\.(csv|jpg|jpeg|png|webp|svg|mp3|ogg|opus|mp4|webm)(?:\?.*)?(?:#.*)?$")
-            .expect("Invalid media file regex")
-    })
-}
-
-fn media_html(tag: &str, url: &str) -> String {
-    formatdoc! {"
-        <{tag} src='{url}' controls>\
-            <span class='dt-error'>Your browser does not support the &lt;$tag&gt; tag.</span>\
-        </{tag}>\
-    "}
-}
+use crate::{
+    markup::{
+        lex::{InlineFormat, ListItemKind},
+        parse::{AstNode, SymbolKind},
+        traversal_utils::Visitor,
+    },
+    unpack_token,
+};
 
 macro_rules! visits {
     ($name:ident $(,)?) => {
@@ -61,8 +33,6 @@ macro_rules! emit {
         $model.out.push_str(&format!($($arg)*))
     };
 }
-
-pub type Visitor<'a, T: AstVisitor<'a>> = fn(&mut T, node: &AstNode<'a>);
 
 /// A visitor trait for traversing and processing AST (Abstract Syntax Tree) nodes.
 ///
@@ -135,6 +105,10 @@ pub trait AstVisitor<'a> {
     visits!(none);
 }
 
+/// Emitted CSS obeys block-element-modifier (BEM) rules:
+/// - **Block:** `.block`
+/// - **Element:** `.block__element`
+/// - **Modifier:** `.block--modifier` or `.block__element--modifier`
 pub struct AstToHtml {
     out: String,
     in_pgraph: bool,
@@ -150,14 +124,6 @@ impl AstToHtml {
     }
 }
 
-// -- bem
-
-/*
-Block: .block
-Element: .block__element
-Modifier: .block--modifier or .block__element--modifier  */
-
-// todo integrate arena alloc
 impl<'a> AstVisitor<'a> for AstToHtml {
     // fallthrough none
     // fallthrough line
@@ -206,27 +172,27 @@ impl<'a> AstVisitor<'a> for AstToHtml {
     visitor!(format, |model: &mut AstToHtml, node| {
         unpack_token!(node[0], InlineFormat { ty });
         match ty {
-            fmt::Bold => {
+            InlineFormat::Bold => {
                 emit!(model, "<b class='dt-bold'>");
                 model.visit_paragraph(&node[1]);
                 emit!(model, "</b>");
             }
-            fmt::Highlight => {
+            InlineFormat::Highlight => {
                 emit!(model, "<mark class='dt-hl'>");
                 model.visit_paragraph(&node[1]);
                 emit!(model, "</mark>");
             }
-            fmt::Italic => {
+            InlineFormat::Italic => {
                 emit!(model, "<i class='dt-italic'>");
                 model.visit_paragraph(&node[1]);
                 emit!(model, "</i>");
             }
-            fmt::Strikethrough => {
+            InlineFormat::Strikethrough => {
                 emit!(model, "<s class='dt-rem'>");
                 model.visit_paragraph(&node[1]);
                 emit!(model, "</s>");
             }
-            fmt::Underline => {
+            InlineFormat::Underline => {
                 emit!(model, "<u class='dt-under'>");
                 model.visit_paragraph(&node[1]);
                 emit!(model, "</u>");
