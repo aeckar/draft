@@ -1,12 +1,16 @@
 use std::sync::OnceLock;
 
+use indoc::{formatdoc};
 use pastey::paste;
 
 use crate::markup::{
     lex::{InlineFormat as fmt, Token},
     parse::{NodeKind, SymbolKind},
     parser_utils::AstNode,
+    visit::ListItemKind,
 };
+
+// todo move all this to utils
 
 static YOUTUBE_LINK: OnceLock<Regex> = OnceLock::new();
 static MEDIA_LINK: OnceLock<Regex> = OnceLock::new();
@@ -28,13 +32,11 @@ fn get_media_link() -> &'static Regex {
 }
 
 fn media_html(tag: &str, url: &str) -> String {
-    format!(
-        "\
+    formatdoc! {"
         <{tag} src='{url}' controls>\
             <span class='dt-error'>Your browser does not support the &lt;$tag&gt; tag.</span>\
         </{tag}>\
-    "
-    )
+    "}
 }
 
 macro_rules! visits {
@@ -149,7 +151,8 @@ pub struct AstToHtml {
 }
 
 impl AstToHtml {
-    pub fn new() -> Self {
+    #[inline(always)]
+    pub const fn new() -> Self {
         Self {
             out: String::new(),
             in_pgraph: false,
@@ -182,21 +185,23 @@ impl<'a> AstVisitor<'a> for AstToHtml {
         model.in_pgraph = false;
     });
 
-    visitor!(newline, |model: &mut AstToHtml, node| {
+    visitor!(newline, |model: &mut AstToHtml, _| {
         emit!(model, " ");
     });
 
     visitor!(list, |model: &mut AstToHtml, node| {
+        let mut prev = ListItemKind::Continuation;  // panics if used to get tag
         for child in node.iter() {
             let marker = &child[0];
             let kinds = vec![];
-            let kind = ListItemKind::new(marker.kind.as_token_kind().unwrap());
+            let kind = ListItemKind::from_token(marker.kind.token().unwrap());
             loop {
                 if kinds.is_empty() {
+                    emit!(model,kind.open_tag_or(prev.unwrap()));
 
                 }
             }
-            
+            prev = Some(kind);
         }
     });
 
@@ -246,7 +251,8 @@ pub struct AstToMarkdown {
 }
 
 impl AstToMarkdown {
-    pub fn new() -> Self {
+    #[inline(always)]
+    pub const fn new() -> Self {
         Self { out: String::new() }
     }
 }

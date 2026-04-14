@@ -7,18 +7,34 @@ use crate::markup::{parse::RuleKind, parser_utils::SymbolKind};
 static FORMAT_VARIANTS: OnceLock<Vec<InlineFormat>> = OnceLock::new();
 
 /// The format in which a numbered list should be displayed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
+#[derive(Debug, Clone, Copy)]
 pub enum Numbering {
     Number,
     Lower,
     Upper,
     LowerNumeral,
     UpperNumeral,
-    Continuation,
+    Continuation { actual_idx: usize },  // using `Box` disallows `Copy` trait
 }
 
 impl Numbering {
+    const EXPLICIT: [Numbering;5]= [
+        Self::Number,
+        Self::Lower,
+        Self::Upper,
+        Self::LowerNumeral,
+        Self::UpperNumeral,
+    ];
+
+    /// Returns the actual numbering type if this is a continuation.
+    pub const fn resolve(self) -> Self {
+        if let Self::Continuation { actual_idx } = self {
+            Self::EXPLICIT[actual_idx]
+        } else {
+            self
+        }
+    }
+
     pub const fn from_marker(marker: u8) -> Option<Self> {
         match marker {
             b'd' => Some(Numbering::Number),
@@ -33,7 +49,6 @@ impl Numbering {
 
 /// The type of inline format marker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter)]
-#[repr(u8)]
 pub enum InlineFormat {
     Bold,
     Italic,
@@ -71,7 +86,6 @@ impl InlineFormat {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
 pub enum CheckboxType {
     Filled,
     Empty,
@@ -175,6 +189,7 @@ pub struct TokenSpan<'a> {
 }
 
 impl<'a> TokenSpan<'a> {
+    #[inline(always)]
     pub const fn new(token: Token<'a>, start: usize, end: usize) -> Self {
         Self { token, start, end }
     }
@@ -186,6 +201,7 @@ impl<'a> TokenSpan<'a> {
     }
 
     /// Marks this span as plaintext.
+    #[inline(always)]
     pub const fn bind_plain(&mut self) {
         self.token = Token::Plaintext;
     }

@@ -1,7 +1,6 @@
-use crate::markup::lex::{Numbering, Token};
+use crate::markup::lex::{CheckboxType, Numbering, Token};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
 pub enum ListItemKind {
     // Basic
     Continuation,
@@ -21,9 +20,10 @@ pub enum ListItemKind {
 }
 
 impl ListItemKind {
-    pub fn is_sibling(self, other: ListItemKind) -> bool {
+    /// Returns true if both kinds of list items can reside within the same list.
+    pub fn is_sibling(self, other: Self) -> bool {
         if self == Self::Continuation {
-            return true;
+            return other.is_numbering();
         }
         if self == Self::Bullet {
             return other == Self::Bullet;
@@ -45,40 +45,66 @@ impl ListItemKind {
         matches!(self, Self::EmptyBox | Self::FilledBox | Self::ToggleBox)
     }
 
-    pub const fn from_token_kind(token: Token) -> Self {
+    pub fn from_token(token: Token) -> Self {
         match token {
             Token::ListItemMarker { .. } => Self::Bullet,
             Token::NumberedItemMarker { ty, .. } => match ty {
+                Numbering::Number => Self::Number,
                 Numbering::Upper => Self::Upper,
                 Numbering::Lower => Self::Lower,
                 Numbering::LowerNumeral => Self::LowerNumeral,
                 Numbering::UpperNumeral => Self::UpperNumeral,
                 Numbering::Continuation => Self::Continuation,
             },
-            Token::Checkbox { ty, .. } => {}
-            _ => panic!("Token is not a list item marker: {token:?}")
+            Token::Checkbox { ty, .. } => match ty {
+                CheckboxType::Empty => Self::EmptyBox,
+                CheckboxType::Filled => Self::FilledBox,
+                CheckboxType::Toggle => Self::ToggleBox,
+            },
+            _ => panic!("Token is not a list item marker: {token:?}"),
         }
     }
 
-    pub const fn open_tag(self) -> Option<&'static str> {
-        match self {
-            Self::Bullet => Some("ul"),
-            Self::Number => Some("ol"),
-            Self::Lower => Some("ol type='a'"),
-            Self::Upper => Some("ol type='A'"),
-            Self::LowerNumeral => Some("ol type='i'"),
-            Self::UpperNumeral => Some("ol type='I'"),
-            Self::Continuation => None,
+    /// Returns the open tag, or that of `fallback` if this is a continuation.
+    pub fn open_tag_or(self, fallback: Self) -> &'static str {
+        if self == Self::Continuation {
+            fallback.open_tag()
+        } else {
+            self.open_tag()
         }
     }
 
-    pub const fn close_tag(self) -> Option<&'static str> {
+    /// Returns the close tag, or that of `fallback` if this is a continuation.
+    pub fn close_tag_or(self, fallback: Self) -> &'static str {
+        if self == Self::Continuation {
+            fallback.close_tag()
+        } else {
+            self.close_tag()
+        }
+    }
+
+    /// Returns the open tag, or panics if this is a continuation.
+    pub const fn open_tag(self) -> &'static str {
         match self {
-            Self::Bullet => Some("ol"),
-            Self::Number | Self::Lower | Self::Upper | Self::LowerNumeral | Self::UpperNumeral => {
-                Some("ol")
-            }
-            Self::Continuation => None,
+            Self::Continuation => panic!("Cannot deduce open tag"),
+            Self::Bullet => "ul class='dt-bullet'",
+            Self::Number => "ol class='dt-numbering'",
+            Self::Lower => "ol type='a' class='dt-numbering'",
+            Self::Upper => "ol type='A' class='dt-numbering'",
+            Self::LowerNumeral => "ol type='i' class='dt-numbering'",
+            Self::UpperNumeral => "ol type='I' class='dt-numbering'",
+            Self::EmptyBox => "ol class='dt-checkbox--empty'",
+            Self::FilledBox => "ol class='dt-checkbox--filled'",
+            Self::ToggleBox => "ol class='det-checkbox--toggle'",
+        }
+    }
+
+    /// Returns the open tag, or panics if this is a continuation.
+    pub const fn close_tag(self) -> &'static str {
+        match self {
+            Self::Bullet => "ul",
+            Self::Continuation => panic!("Cannot deduce close tag"),
+            _ => "ol",
         }
     }
 }

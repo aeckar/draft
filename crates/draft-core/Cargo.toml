@@ -11,6 +11,7 @@ repository = "https://github.com/aeckar/draft"
 thiserror = "2.0.18"
 pastey = "0.2.1"
 derive_more = { version = "2.1.1", features = ["deref"] }
+indoc = "2.0.7"
 
 # compilation
 mime_guess = "2.0.5"

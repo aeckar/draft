@@ -15,7 +15,6 @@ pub trait SymbolKind {
 ///
 /// The suffix *-Kind* is used instead of *-Id* to avoid confusion with unique serial numbers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
 pub enum RuleKind {
     Markup,
     TopLevelElement,
