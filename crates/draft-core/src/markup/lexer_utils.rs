@@ -1,6 +1,6 @@
 use std::sync::OnceLock;
 
-use strum::{EnumDiscriminants, EnumIter, IntoEnumIterator};
+use strum::EnumDiscriminants;
 
 use crate::markup::parse::{RuleKind, SymbolKind};
 
@@ -14,7 +14,6 @@ pub enum Numbering {
     Upper,
     LowerNumeral,
     UpperNumeral,
-    Continuation,
 }
 
 impl Numbering {
@@ -30,41 +29,29 @@ impl Numbering {
     }
 }
 
-/// The type of inline format marker.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter)]
-pub enum InlineFormat {
-    Bold,
-    Italic,
-    Strikethrough,
-    Underline,
-    Highlight,
+bitflags::bitflags! {
+    /// The type of inline format marker.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct InlineFormat: u8 {
+        const Bold = 0b0000_0001;
+        const Italic = 0b0000_0010;
+        const Strikethrough = 0b0000_0100;
+        const Underline = 0b000_1000;
+        const Highlight = 0b0001_0000;
+    }
 }
 
 impl InlineFormat {
-    pub const BOLD_FLAG: u8 = 0b1;
-    pub const ITALIC_FLAG: u8 = 0b10;
-    pub const STRIKETHROUGH_FLAG: u8 = 0b100;
-    pub const UNDERLINE_FLAG: u8 = 0b1000;
-    pub const HIGHLIGHT_FLAG: u8 = 0b1_0000;
-    pub const BOLD_ITALIC: u8 = Self::BOLD_FLAG | Self::ITALIC_FLAG;
+    pub const BOLD_ITALIC: u8 = Self::Bold.bits() | Self::Italic.bits();
 
     const LENGTHS: [usize; 5] = [2, 1, 1, 1, 1];
 
     /// Returns the length of the character cluster that denotes the given flag or bitmask.
     pub const fn len(mask: u8) -> usize {
-        if mask == Self::BOLD_FLAG | Self::ITALIC_FLAG {
+        if mask == Self::BOLD_ITALIC {
             return 3;
         }
         Self::LENGTHS[mask.ilog2() as usize]
-    }
-
-    /// Panics if a bitmask or invalid flag is given.
-    pub fn from_flag(flag: u8) -> Self {
-        Self::variants()[flag.ilog2() as usize]
-    }
-
-    fn variants() -> &'static Vec<InlineFormat> {
-        FORMAT_VARIANTS.get_or_init(|| InlineFormat::iter().collect())
     }
 }
 
@@ -123,6 +110,7 @@ pub enum Token<'a> {
     Checkbox { indent: u8, ty: CheckboxType },
     ListItemMarker { indent: u8 },
     NumberedItemMarker { indent: u8, ty: Numbering },
+    ContinuationMarker { indent: u8 },
     AssignmentMarker { alias: &'a [u8] }, // [<key>]=<value>//todo works for citations via interpolation (`{paul}` => `[paul]=cite.{}`)
     Eof, // necessary to find bound for trailing plaintext; pruned before parsing
 }

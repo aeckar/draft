@@ -1,3 +1,5 @@
+//! todo explain x vs x_utils
+//! 
 //! Modules should be imported internally using re-export.
 pub mod config;
 mod lexer;

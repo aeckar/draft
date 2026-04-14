@@ -86,9 +86,9 @@ impl<'a> Lexer<'a> {
                 b'-' => scan.handle_dash(tape),
                 b'.' => scan.handle_dot(tape),
                 b'*' => scan.handle_star(tape),
-                b'_' => scan.handle_pair(tape, fmt::UNDERLINE_FLAG),
-                b'|' => scan.handle_pair(tape, fmt::HIGHLIGHT_FLAG),
-                b'~' => scan.handle_pair(tape, fmt::STRIKETHROUGH_FLAG),
+                b'_' => scan.handle_pair(tape, fmt::Underline.bits()),
+                b'|' => scan.handle_pair(tape, fmt::Highlight.bits()),
+                b'~' => scan.handle_pair(tape, fmt::Strikethrough.bits()),
                 b'[' => scan.handle_obrac(tape),
                 b']' => scan.handle_cbrac(tape),
                 b'=' => scan.handle_equals(tape),
@@ -264,7 +264,7 @@ impl<'a> Scanner<'a> {
                 // basic pair
                 self.emit(
                     Token::InlineFormat {
-                        ty: fmt::from_flag(open_mask),
+                        ty: fmt::from_bits(open_mask).unwrap(),
                         twin_pos: start,
                     },
                     open_pos,
@@ -273,7 +273,7 @@ impl<'a> Scanner<'a> {
                 self.emit_inplace(
                     tape,
                     Token::InlineFormat {
-                        ty: fmt::from_flag(open_mask),
+                        ty: fmt::from_bits(open_mask).unwrap(),
                         twin_pos: open_pos,
                     },
                     open_len,
@@ -315,8 +315,8 @@ impl<'a> Scanner<'a> {
                 );
             } else {
                 // open_mask == fmt::BOLD_ITALIC
-                if mask == fmt::BOLD_FLAG {
-                    self.open_fmts.push((fmt::ITALIC_FLAG, open_pos));
+                if mask == fmt::Bold.bits() {
+                    self.open_fmts.push((fmt::Italic.bits(), open_pos));
                     self.emit(
                         Token::InlineFormat {
                             ty: fmt::Bold,
@@ -334,7 +334,7 @@ impl<'a> Scanner<'a> {
                         2,
                     );
                 } else {
-                    self.open_fmts.push((fmt::BOLD_FLAG, open_pos));
+                    self.open_fmts.push((fmt::Bold.bits(), open_pos));
                     self.emit(
                         Token::InlineFormat {
                             ty: fmt::Italic,
@@ -452,9 +452,8 @@ impl<'a> Scanner<'a> {
             //tle: item markers must be adjacent to be of same list
             self.emit_inplace(
                 tape,
-                Token::NumberedItemMarker {
+                Token::ContinuationMarker {
                     indent: tape.count_indent(),
-                    ty: Numbering::Continuation,
                 },
                 1,
             );
@@ -648,12 +647,12 @@ impl<'a> Scanner<'a> {
     #[must_use]
     fn handle_star(&mut self, tape: Tape<'a, u8>) -> Option<Tape<'a, u8>> {
         if tape.is_at(b"***") {
-            self.handle_pair(tape, fmt::BOLD_FLAG | fmt::ITALIC_FLAG)
+            self.handle_pair(tape, fmt::Bold.bits() | fmt::Italic.bits())
         } else if tape.is_at(b"**") {
-            self.handle_pair(tape, fmt::BOLD_FLAG)
+            self.handle_pair(tape, fmt::Bold.bits())
         } else {
             // try for '*'
-            self.handle_pair(tape, fmt::ITALIC_FLAG)
+            self.handle_pair(tape, fmt::Italic.bits())
         }
     }
 

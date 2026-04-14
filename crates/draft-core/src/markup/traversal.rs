@@ -5,7 +5,7 @@ use pastey::paste;
 
 use crate::markup::{
     lex::{InlineFormat as fmt, Token},
-    parse::{AstNode, NodeKind, SymbolKind},
+    parse::{AstNode, SymbolKind},
     visit::ListItemKind,
 };
 
