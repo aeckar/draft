@@ -1,20 +1,20 @@
 use std::vec;
 
-use crate::markup::lex::Token;
-use crate::markup::lexer_utils::TokenKind as token;
-use crate::markup::parse::AstNode;
-use crate::markup::parse::NodeKind;
-use crate::markup::parser_utils::NodeMetadata as meta;
-use crate::markup::parser_utils::RuleKind as rule;
+use crate::compile::lex::Token;
+use crate::compile::lexer_utils::TokenKind as token;
+use crate::compile::parse::AstNode;
+use crate::compile::parse::NodeKind;
+use crate::compile::parser_utils::NodeMetadata as meta;
+use crate::compile::parser_utils::RuleKind as rule;
 use crate::{
     compile::Compile,
-    markup::{lexer_utils::TokenSpan, parser_utils::AstNode as node},
+    compile::{lexer_utils::TokenSpan, parser_utils::AstNode as node},
     tape::Tape,
 };
 
 /// Since a zero-length input is also accepted, a match (even if partial)
 /// will always be made. To check if the entire input is matched, check the root `end`.
-struct Parser<'a> {
+pub struct Parser<'a> {
     // All tokens in the markup file.
     tokens: &'a [TokenSpan<'a>],
 }
@@ -23,7 +23,7 @@ impl<'a> Compile for Parser<'a> {
     type Output = Result<'a>;
 
     fn compile(self) -> Self::Output {
-        Rules::markup(Tape::new(self.tokens))
+        Grammar::markup(Tape::new(self.tokens))
     }
 }
 
@@ -134,7 +134,8 @@ pub type Handler<'a> = fn(SpanTape<'a>) -> Option<(node<'a>, SpanTape<'a>)>;
 /// ```ebnf
 /// markup := topLevelElement*
 ///
-/// topLevelElement := HorizontalRule
+/// topLevelElement := Newline
+///     | HorizontalRule
 ///     | CodeBlock
 ///     | MathBlock
 ///     | paragraph
@@ -142,10 +143,10 @@ pub type Handler<'a> = fn(SpanTape<'a>) -> Option<(node<'a>, SpanTape<'a>)>;
 ///     | heading
 ///     | lineQuote
 ///     | blockQuote
-/// heading := Heading
+/// heading := HeadingMarker
 ///     & line
 ///     & Newline
-/// paragraph := (Newline | lineElement)+ (stop-at:Newline & Newline)
+/// paragraph := (Newline | lineElement)+   # stop at Newline & Newline
 ///
 /// line := lineElement+
 ///     & Newline
@@ -170,7 +171,7 @@ pub type Handler<'a> = fn(SpanTape<'a>) -> Option<(node<'a>, SpanTape<'a>)>;
 ///     & topLevelElement+
 ///     & BlockQuoteClose
 ///
-/// list := listItem+
+/// list := listItem & (Newline* & listItem)*   # may be multiple lists, split during second pass
 /// listItem := (ListItemMarker | NumberedItemMarker | Checkbox) & paragraph
 ///
 /// macro := MacroHandle
@@ -191,9 +192,11 @@ pub type Handler<'a> = fn(SpanTape<'a>) -> Option<(node<'a>, SpanTape<'a>)>;
 /// including performance. This applies to traversal as well.
 ///
 /// Macros for common operations enable rapid iteration for changes in the EBNF.
-pub struct Rules;
+///
+/// Any caching/indexing should occur in the LSP itself, not due to the parser.
+pub struct Grammar;
 
-impl<'a> Rules {
+impl<'a> Grammar {
     rule!(markup, |mut tape| {
         let mut children = vec![];
         while let Some((child, jump)) = Self::top_level_element(tape) {
@@ -204,7 +207,7 @@ impl<'a> Rules {
     });
 
     rule!(top_level_element, |mut tape| {
-        let (len, res) = token_options![tape; HorizontalRule, CodeBlock, MathBlock];
+        let (len, res) = token_options![tape; Newline, HorizontalRule, CodeBlock, MathBlock];
         if let Some((choice, child)) = res {
             return Some((
                 node::branch(rule::TopLevelElement, vec![child], choice),
@@ -342,13 +345,13 @@ impl<'a> Rules {
         Some((node::branch(rule::List, vec![a], meta::None), tape))
     });
 
-    rule!(list_item, |mut tape| {
-        let (_, res) = token_options![tape;ListItemMarker,NumberedItemMarker, Checkbox];
+    pub fn list_item(mut tape: SpanTape<'a>, parent: AstNode<'a>) -> Result<'a> {
+        let (_, res) = token_options![tape; ListItemMarker,NumberedItemMarker,Checkbox];
         let (choice, child) = res?;
         let a = node::branch(rule::None, vec![child], choice);
         let (b, tape) = Self::paragraph(tape)?;
         Some((node::branch(rule::ListItem, vec![a, b], meta::None), tape))
-    });
+    }
 
     rule!(line_quote, |mut tape| {
         let a = try_token!(tape, LineQuoteMarker)?;

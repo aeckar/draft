@@ -1,4 +1,4 @@
-use crate::markup::lex::{CheckboxType, Numbering, Token};
+use crate::compile::lex::{CheckboxType, Numbering, Token};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ListItemKind {

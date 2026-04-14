@@ -3,59 +3,78 @@ name = "draft-core"
 version = "0.1.0"
 edition = "2024"
 authors = ["Angel Eckardt <eckardt.angel7@outlook.com>"]
-license = "AGPL-3.0-only"
+license = "AGPL-3.0-only"                                # disallow competitors until launch
 homepage = "https://github.com/aeckar/draft"
 repository = "https://github.com/aeckar/draft"
 
 [dependencies]
 thiserror = "2.0.18"
 pastey = "0.2.1"
-derive_more = { version = "2.1.1", features = ["deref"] }
 indoc = "2.0.7"
+bitflags = "2.11.1"
+derive_more = { version = "2.1.1", features = ["deref"] }
 
-# compilation
-mime_guess = "2.0.5"
-video-url-validator = "0.1.0"
-html-escape = "0.2.13"
+# compile to HTML
+mime_guess = { version = "2.0.5", optional = true }
+video-url-validator = { version = "0.1.0", optional = true }
+html-escape = { version = "0.2.13", optional = true }
 
-# list discriminants of `Token` and `InlineFormat`
-strum = { version = "0.28.0", features = ["derive"] }
+# discrimant handling in multi-pass markup compiler
+strum = { version = "0.28.0", optional = true, features = ["derive"] }
 
 # vectorized UTF-8 validation for file input
 simdutf8 = "0.1.5"
 
 # runtime execution of user-defined JavaScript macros
-boa_engine = "0.21.0"
+boa_engine = { version = "0.21.0", optional = true }
 
 # vectorized byte search for `Tape`
 memchr = "2.8.0"
 
 # conversion from Markdown to Draft (`draft migrate`)
-pulldown-cmark = "0.13.3"
+pulldown-cmark = { version = "0.13.3", optional = true }
 
-# table conversions from CSV
-csv = "1.4.0"
+# table conversions from CSV via `table` macro
+csv = { version = "1.4.0", optional = true }
 
 # faster than `std`
 # provides partial parsing for object notation
-lexical-core = { version = "1.0.6", default-features = false, features = [
+lexical-core = { version = "1.0.6", optional = true, default-features = false, features = [
     "parse-floats",
     "write-floats",
 ] }
 
-#todo
-# expose serialization hooks for object notation
+# expose serialization API for object notation
 # JSON (de)serialization support
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0.149"
+serde = { version = "1.0", optional = true, features = ["derive"] }
+serde_json = { version = "1.0.149", optional = true }
 
 [features]
-# default = ["compile", "format"]
-# compile = []
-# format = []
-# transpile = ["markdown-parser-crate"] # Only pull in Markdown deps if needed
-# macros = 
-# serde = 
+default = ["compile", "format"]
+full = [
+    "compile",
+    "data",
+    "expressions",
+    "format",
+    "html",
+    "markdown",
+    "macros",
+    "serde",
+]
+
+parse-markup = ["dep:strum"]
+parse-data = ["dep:lexical-core"]
+parse-expressions = ["parse-data"]
+format = []
+html = [
+    "parse-markup",
+    "dep:html-escape",
+    "dep:mime_guess",
+    "dep:video-url-validator",
+]
+markdown = ["parse-markup", "dep:pulldown-cmark"]
+macros = ["dep:boa_engine", "dep:csv"]
+serde = ["parse-data", "dep:serde", "dep:serde_json"]
 
 [lib]
 path = "src/lib.rs"

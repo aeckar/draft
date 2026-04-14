@@ -1,8 +1,8 @@
 use simdutf8::basic::{self, Utf8Error};
 use thiserror::Error;
 
-use crate::markup::config::{DynConf, StaticConf};
-use crate::markup::lexer_utils::{CheckboxType, InlineFormat as fmt, Numbering, Token, TokenSpan};
+use crate::compile::config::{DynConf, StaticConf};
+use crate::compile::lexer_utils::{CheckboxType, InlineFormat as fmt, Numbering, Token, TokenSpan};
 use crate::prelude::*;
 use crate::tape::Tape;
 
@@ -12,8 +12,180 @@ pub enum LexerError {
     InvalidUtf8(#[from] Utf8Error),
 }
 
+/// Draft markup syntax.
+#[derive(Debug)]
+pub struct Lexer<'a> {
+    /// The input text.
+    pub input: &'a [u8],
+
+    /// Dynamic configuration.
+    pub dyn_conf: &'a DynConf,
+
+    /// Static configuration.
+    pub static_conf: &'a StaticConf,
+}
+
+impl<'a> Compile for Lexer<'a> {
+    type Output = Result<Vec<TokenSpan<'a>>, LexerError>;
+
+    fn compile(self) -> Self::Output {
+        if !self.static_conf.trusted_mode {
+            let this = &self;
+            basic::from_utf8(this.input)?;
+        }
+        let tokens = self.parse_virtual_tokens();
+        let mut tokens = self.parse_text_tokens(tokens);
+        self.convert_bad_tokens(&mut tokens);
+        tokens.pop(); // remove `Eof`
+        Ok(tokens)
+    }
+}
+
+impl<'a> Lexer<'a> {
+    pub const fn new(dyn_conf: &'a DynConf, static_conf: &'a StaticConf, input: &'a [u8]) -> Self {
+        Self {
+            input,
+            dyn_conf,
+            static_conf,
+        }
+    }
+
+    #[must_use]
+    fn parse_virtual_tokens(&self) -> Vec<TokenSpan<'a>> {
+        let mut scan = Scanner {
+            in_alt_text: false,
+            pgraph_spacing: 2,
+            tokens: vec![],
+            open_quotes: Vec::with_capacity(2),
+            open_fmts: vec![],
+        };
+        let mut tape = Tape::new(self.input);
+
+        // Because these symbols may show up in prose,
+        // we should expect them to most likely be plain text first.
+        //
+        // This means we should minimize the # of match arms.
+        while let Some(&ch) = self.input.get(tape.pos) {
+            let jump: Option<Tape<'a, u8>> = match ch {
+                // ordered by expected frequency
+                b'\n' => {
+                    scan.pgraph_spacing = 2;
+                    scan.emit_inplace(tape, Token::Newline, 1);
+                    // Returning a positive result even though the cursor hasn't moved
+                    // results in a negligible performance hit
+                    // from copying the tape data structure.
+                    // It's more important to maintain semantics.
+                    Some(tape)
+                }
+                b'`' => scan.handle_btick(tape),
+                b'$' => scan.handle_dollar(tape, self.static_conf.finance_mode),
+                b'-' => scan.handle_dash(tape),
+                b'.' => scan.handle_dot(tape),
+                b'*' => scan.handle_star(tape),
+                b'_' => scan.handle_pair(tape, fmt::UNDERLINE_FLAG),
+                b'|' => scan.handle_pair(tape, fmt::HIGHLIGHT_FLAG),
+                b'~' => scan.handle_pair(tape, fmt::STRIKETHROUGH_FLAG),
+                b'[' => scan.handle_obrac(tape),
+                b']' => scan.handle_cbrac(tape),
+                b'=' => scan.handle_equals(tape),
+                b'"' | b'\'' => scan.handle_quote(tape, tape[tape.pos]),
+                b'\\' => scan.handle_bslash(tape),
+                b';' => {
+                    // divider comment ';;' handled by editor
+                    tape.seek_ch(b'\n');
+                    Some(tape)
+                }
+                _ => None, // includes spaces, tabs
+            };
+            if let Some(jump) = jump {
+                tape = jump;
+            }
+            tape.adv();
+        }
+        scan.tokens
+            .sort_unstable_by(|t1, t2| t1.start.cmp(&t2.start));
+        scan.tokens
+            .push(TokenSpan::new(Token::Eof, tape.raw.len(), tape.raw.len()));
+        scan.tokens
+    }
+
+    #[must_use]
+    fn parse_text_tokens(&self, tokens: Vec<TokenSpan<'a>>) -> Vec<TokenSpan<'a>> {
+        let mut read = 0;
+        let mut text_start = 0;
+        let mut pos = 0;
+        let mut result = vec![];
+        while read < tokens.len() {
+            // collect plaintext tokens
+            let next = &tokens[read];
+            if next.start == pos {
+                if pos - text_start != 0 {
+                    result.push(TokenSpan::new(Token::Plaintext, text_start, pos));
+                }
+                result.push(*next);
+                read += 1;
+                pos += next.len();
+                text_start = pos;
+            } else {
+                pos += 1;
+            }
+        }
+        result
+    }
+
+    /// Transforms malformed structures into plaintext, including:
+    /// - Links/Embeds without a body
+    /// - Empty headings
+    /// - Empty list items
+    /// - Empty quotes
+    /// - Empty math blocks
+    /// - Empty code blocks
+    ///
+    /// Malformed tokens found are marked as plaintext.
+    ///
+    /// Since macro expansion is handled outside of the compiler, we assume that all macro
+    /// invocations produce text at this stage.
+    fn convert_bad_tokens(&self, tokens: &mut Vec<TokenSpan<'a>>) {
+        use Token::*;
+        for i in 0..tokens.len() {
+            match tokens[i].token {
+                // access by index to satisfy borrow checker
+                HeadingMarker { .. }
+                | LineQuoteMarker
+                | ListItemMarker { .. }
+                | NumberedItemMarker { .. }
+                | Checkbox { .. }
+                    if !tokens.get(i + 1).is_some_and(|t| t.token.is_content()) =>
+                {
+                    tokens[i].bind_plain();
+                }
+                LinkMarker | EmbedMarker
+                    if tokens
+                        .iter()
+                        .find(|t| matches!(t.token, LinkBody { .. }) || t.token.is_content())
+                        .is_some_and(|t| matches!(t.token, LinkBody { .. })) =>
+                {
+                    tokens[i].bind_plain();
+                }
+                CodeBlock { body, .. } | MathBlock { body } if body.is_empty() => {
+                    tokens[i].bind_plain();
+                }
+                BlockQuoteOpen
+                    if tokens
+                        .iter()
+                        .find(|t| t.token == BlockQuoteClose || t.token.is_content())
+                        .is_some_and(|t| t.token.is_content()) =>
+                {
+                    tokens[i].bind_plain();
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
 /// Encapsulates mutable state shared between different handlers during Pass 1.
-struct VirtualLexer<'a> {
+struct Scanner<'a> {
     /// Virtual (non-plaintext) tokens.
     tokens: Vec<TokenSpan<'a>>,
 
@@ -42,7 +214,7 @@ struct VirtualLexer<'a> {
 }
 
 /// All `handle_X` functions assume cursor is at a valid character.
-impl<'a> VirtualLexer<'a> {
+impl<'a> Scanner<'a> {
     /// Pushes the token nside the input between the start and end indices.
     /// The end index is exclusive.   
     #[inline]
@@ -273,6 +445,7 @@ impl<'a> VirtualLexer<'a> {
     #[must_use]
     fn handle_dot(&mut self, tape: Tape<'a, u8>) -> Option<Tape<'a, u8>> {
         if tape.is_cur_prefix() {
+            //tle: item markers must be adjacent to be of same list
             self.emit_inplace(
                 tape,
                 Token::NumberedItemMarker {
@@ -540,177 +713,5 @@ impl<'a> VirtualLexer<'a> {
             // stop after '}'
         }
         Some(tape)
-    }
-}
-
-/// Draft markup syntax.
-#[derive(Debug)]
-pub struct Lexer<'a> {
-    /// The input text.
-    pub input: &'a [u8],
-
-    /// Dynamic configuration.
-    pub dyn_conf: &'a DynConf,
-
-    /// Static configuration.
-    pub static_conf: &'a StaticConf,
-}
-
-impl<'a> Compile for Lexer<'a> {
-    type Output = Result<Vec<TokenSpan<'a>>, LexerError>;
-
-    fn compile(self) -> Self::Output {
-        if !self.static_conf.trusted_mode {
-            let this = &self;
-            basic::from_utf8(this.input)?;
-        }
-        let tokens = self.parse_virtual_tokens();
-        let mut tokens = self.parse_text_tokens(tokens);
-        self.convert_bad_tokens(&mut tokens);
-        tokens.pop(); // remove `Eof`
-        Ok(tokens)
-    }
-}
-
-impl<'a> Lexer<'a> {
-    pub const fn new(dyn_conf: &'a DynConf, static_conf: &'a StaticConf, input: &'a [u8]) -> Self {
-        Self {
-            input,
-            dyn_conf,
-            static_conf,
-        }
-    }
-
-    #[must_use]
-    fn parse_virtual_tokens(&self) -> Vec<TokenSpan<'a>> {
-        let mut lex = VirtualLexer {
-            in_alt_text: false,
-            pgraph_spacing: 2,
-            tokens: vec![],
-            open_quotes: Vec::with_capacity(2),
-            open_fmts: vec![],
-        };
-        let mut tape = Tape::new(self.input);
-
-        // Because these symbols may show up in prose,
-        // we should expect them to most likely be plain text first.
-        //
-        // This means we should minimize the # of match arms.
-        while let Some(&ch) = self.input.get(tape.pos) {
-            let jump: Option<Tape<'a, u8>> = match ch {
-                // ordered by expected frequency
-                b'\n' => {
-                    lex.pgraph_spacing = 2;
-                    lex.emit_inplace(tape, Token::Newline, 1);
-                    // Returning a positive result even though the cursor hasn't moved
-                    // results in a negligible performance hit
-                    // from copying the tape data structure.
-                    // It's more important to maintain semantics.
-                    Some(tape)
-                }
-                b'`' => lex.handle_btick(tape),
-                b'$' => lex.handle_dollar(tape, self.static_conf.finance_mode),
-                b'-' => lex.handle_dash(tape),
-                b'.' => lex.handle_dot(tape),
-                b'*' => lex.handle_star(tape),
-                b'_' => lex.handle_pair(tape, fmt::UNDERLINE_FLAG),
-                b'|' => lex.handle_pair(tape, fmt::HIGHLIGHT_FLAG),
-                b'~' => lex.handle_pair(tape, fmt::STRIKETHROUGH_FLAG),
-                b'[' => lex.handle_obrac(tape),
-                b']' => lex.handle_cbrac(tape),
-                b'=' => lex.handle_equals(tape),
-                b'"' | b'\'' => lex.handle_quote(tape, tape[tape.pos]),
-                b'\\' => lex.handle_bslash(tape),
-                b';' => {
-                    // divider comment ';;' handled by editor
-                    tape.seek_ch(b'\n');
-                    Some(tape)
-                }
-                _ => None, // includes spaces, tabs
-            };
-            if let Some(jump) = jump {
-                tape = jump;
-            }
-            tape.adv();
-        }
-        lex.tokens
-            .sort_unstable_by(|t1, t2| t1.start.cmp(&t2.start));
-        lex.tokens
-            .push(TokenSpan::new(Token::Eof, tape.raw.len(), tape.raw.len()));
-        lex.tokens
-    }
-
-    #[must_use]
-    fn parse_text_tokens(&self, tokens: Vec<TokenSpan<'a>>) -> Vec<TokenSpan<'a>> {
-        let mut read = 0;
-        let mut text_start = 0;
-        let mut pos = 0;
-        let mut result = vec![];
-        while read < tokens.len() {
-            // collect plaintext tokens
-            let next = &tokens[read];
-            if next.start == pos {
-                if pos - text_start != 0 {
-                    result.push(TokenSpan::new(Token::Plaintext, text_start, pos));
-                }
-                result.push(*next);
-                read += 1;
-                pos += next.len();
-                text_start = pos;
-            } else {
-                pos += 1;
-            }
-        }
-        result
-    }
-
-    /// Transforms malformed structures into plaintext, including:
-    /// - Links/Embeds without a body
-    /// - Empty headings
-    /// - Empty list items
-    /// - Empty quotes
-    /// - Empty math blocks
-    /// - Empty code blocks
-    ///
-    /// Malformed tokens found are marked as plaintext.
-    ///
-    /// Since macro expansion is handled outside of the compiler, we assume that all macro
-    /// invocations produce text at this stage.
-    fn convert_bad_tokens(&self, tokens: &mut Vec<TokenSpan<'a>>) {
-        use Token::*;
-        for i in 0..tokens.len() {
-            match tokens[i].token {
-                // access by index to satisfy borrow checker
-                HeadingMarker { .. }
-                | LineQuoteMarker
-                | ListItemMarker { .. }
-                | NumberedItemMarker { .. }
-                | Checkbox { .. }
-                    if !tokens.get(i + 1).is_some_and(|t| t.token.is_content()) =>
-                {
-                    tokens[i].bind_plain();
-                }
-                LinkMarker | EmbedMarker
-                    if tokens
-                        .iter()
-                        .find(|t| matches!(t.token, LinkBody { .. }) || t.token.is_content())
-                        .is_some_and(|t| matches!(t.token, LinkBody { .. })) =>
-                {
-                    tokens[i].bind_plain();
-                }
-                CodeBlock { body, .. } | MathBlock { body } if body.is_empty() => {
-                    tokens[i].bind_plain();
-                }
-                BlockQuoteOpen
-                    if tokens
-                        .iter()
-                        .find(|t| t.token == BlockQuoteClose || t.token.is_content())
-                        .is_some_and(|t| t.token.is_content()) =>
-                {
-                    tokens[i].bind_plain();
-                }
-                _ => {}
-            }
-        }
     }
 }

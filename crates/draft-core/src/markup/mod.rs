@@ -1,3 +1,4 @@
+#![cfg(feature = "compile")]
 pub mod config;
 mod lexer;
 mod lexer_utils;

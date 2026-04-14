@@ -3,7 +3,7 @@ mod compile;
 pub mod data;
 pub mod expr;
 mod ext;
-pub mod markup;
+pub mod compile;
 mod tape;
 
 pub mod prelude {

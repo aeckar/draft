@@ -3,7 +3,7 @@ use std::sync::OnceLock;
 use indoc::{formatdoc};
 use pastey::paste;
 
-use crate::markup::{
+use crate::compile::{
     lex::{InlineFormat as fmt, Token},
     parse::{NodeKind, SymbolKind},
     parser_utils::AstNode,
