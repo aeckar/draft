@@ -1,9 +1,9 @@
 use std::sync::OnceLock;
 
-use indoc::{formatdoc};
+use indoc::formatdoc;
 use pastey::paste;
 
-use crate::compile::{
+use crate::markup::{
     lex::{InlineFormat as fmt, Token},
     parse::{NodeKind, SymbolKind},
     parser_utils::AstNode,
@@ -190,15 +190,14 @@ impl<'a> AstVisitor<'a> for AstToHtml {
     });
 
     visitor!(list, |model: &mut AstToHtml, node| {
-        let mut prev = ListItemKind::Continuation;  // panics if used to get tag
+        let mut prev = ListItemKind::Continuation; // panics if used to get tag
         for child in node.iter() {
             let marker = &child[0];
             let kinds = vec![];
             let kind = ListItemKind::from_token(marker.kind.token().unwrap());
             loop {
                 if kinds.is_empty() {
-                    emit!(model,kind.open_tag_or(prev.unwrap()));
-
+                    emit!(model, kind.open_tag_or(prev.unwrap()));
                 }
             }
             prev = Some(kind);

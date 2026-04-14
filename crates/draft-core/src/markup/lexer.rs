@@ -1,8 +1,8 @@
 use simdutf8::basic::{self, Utf8Error};
 use thiserror::Error;
 
-use crate::compile::config::{DynConf, StaticConf};
-use crate::compile::lexer_utils::{CheckboxType, InlineFormat as fmt, Numbering, Token, TokenSpan};
+use crate::markup::config::{DynConf, StaticConf};
+use crate::markup::lexer_utils::{CheckboxType, InlineFormat as fmt, Numbering, Token, TokenSpan};
 use crate::prelude::*;
 use crate::tape::Tape;
 

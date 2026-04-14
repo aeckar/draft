@@ -1,4 +1,3 @@
-#![cfg(feature = "parse-markup")]
 pub mod config;
 mod lexer;
 mod lexer_utils;

@@ -1,11 +1,11 @@
 use std::vec;
 
-use crate::compile::lex::Token;
-use crate::compile::lexer_utils::TokenKind as token;
-use crate::compile::parse::AstNode;
-use crate::compile::parse::NodeKind;
-use crate::compile::parser_utils::NodeMetadata as meta;
-use crate::compile::parser_utils::RuleKind as rule;
+use crate::markup::lex::Token;
+use crate::markup::lexer_utils::TokenKind as token;
+use crate::markup::parse::AstNode;
+use crate::markup::parse::NodeKind;
+use crate::markup::parser_utils::NodeMetadata as meta;
+use crate::markup::parser_utils::RuleKind as rule;
 use crate::{
     compile::Compile,
     compile::{lexer_utils::TokenSpan, parser_utils::AstNode as node},

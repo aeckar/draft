@@ -1,8 +1,8 @@
 use derive_more::derive::Deref;
 
-use crate::compile::lexer_utils::{Token, TokenKind, TokenSpan};
-use crate::compile::parse::SpanTape;
-use crate::compile::parser_utils::NodeMetadata as meta;
+use crate::markup::lexer_utils::{Token, TokenKind, TokenSpan};
+use crate::markup::parse::SpanTape;
+use crate::markup::parser_utils::NodeMetadata as meta;
 
 /// A token or parser rule that can be matched to some slice of the
 /// list of tokens produced after lexing.
