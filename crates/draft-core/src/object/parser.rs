@@ -58,9 +58,15 @@ impl Display for Object {
             }
             Self::Map { map } => {
                 write!(f, ".{{")?;
-                for (idx, (key, val)) in map.iter().enumerate() {
+
+                // Sort keys for deterministic output
+                let mut keys: Vec<&String> = map.keys().collect();
+                keys.sort_unstable();
+
+                for (idx, key) in keys.iter().enumerate() {
+                    let val = &map[*key];
                     write!(f, "{key}={val}")?;
-                    if idx != map.len() - 1 {
+                    if idx != keys.len() - 1 {
                         write!(f, ",")?;
                     }
                 }
@@ -71,18 +77,13 @@ impl Display for Object {
     }
 }
 
-struct Name {
-    
-}
 impl Object {
     pub fn to_pstring(&self) -> String {
         let mut buf = String::new();
-        // Start with 0 indentation
         self.pfmt(&mut buf, 0).unwrap();
         buf
-        l;
     }
-    
+
     pub fn pfmt(&self, f: &mut dyn std::fmt::Write, depth: usize) -> std::fmt::Result {
         let indent = " ".repeat(depth * 4);
         let next_indent = " ".repeat((depth + 1) * 4);
@@ -108,23 +109,65 @@ impl Object {
                     return write!(f, ".{{}}");
                 }
                 if map.len() == 1 {
-                    let (key, val)=map.iter().next().unwrap();
+                    let (key, val) = map.iter().next().unwrap();
                     write!(f, ".{{\n{next_indent}{key} = ")?;
                     val.pfmt(f, depth + 1)?;
                     return write!(f, ",\n{indent}}}"); // use trailing comma
                 }
-                let mut groups: Vec<Vec<&str>> = Vec::with_capacity(map.len());
-                groups.push(map.keys().map(|s| s.as_str()).collect());
-                while groups.len() < groups.capacity() {
-                    let pool = &groups[0];
-                    let Some((a_pre, a_rest)) = groups[groups.len() - 1][0].split_once('.') else {
+                writeln!(f, ".{{")?;
 
+                // Sort keys for deterministic output
+                let mut sorted_keys: Vec<&String> = map.keys().collect();
+                sorted_keys.sort_unstable();
+
+                let mut i = 0;
+                while i < sorted_keys.len() {
+                    let key = sorted_keys[i];
+                    let key_parts = key.split_once('.');
+
+                    // Unscoped keys
+                    if key_parts.is_none() {
+                        let val = &map[key];
+                        write!(f, "{next_indent}{key} = ")?;
+                        val.pfmt(f, depth + 1)?;
+                        writeln!(f, ",")?;
+                        i += 1;
                         continue;
-                    };
-                    for key in &pool[1..] {
-                        if key.starts_with(prefix) {
-                            
+                    }
+
+                    // Find number of consecutive keys sharing this prefix
+                    let (prefix, _) = key_parts.unwrap();
+                    let dot_prefix = format!("{}.", prefix);
+                    let mut scope_end = i + 1;
+                    while scope_end < sorted_keys.len()
+                        && sorted_keys[scope_end].starts_with(&dot_prefix)
+                    {
+                        scope_end += 1;
+                    }
+
+                    // If at least two keys share this prefix, group them as key scope
+                    if scope_end - i > 1 {
+                        write!(f, "{next_indent}{prefix}.{{\n")?;
+
+                        // Collect stripped keys as keys in scope
+                        let mut key_scope = HashMap::new();
+                        for k in &sorted_keys[i..scope_end] {
+                            let stripped_key = k.strip_prefix(&dot_prefix).unwrap().to_string();
+                            key_scope.insert(stripped_key, map[*k].clone());
                         }
+
+                        // Format key-value pairs with stripped keys
+                        let mut scoped_keys: Vec<_> = key_scope.keys().collect();
+                        scoped_keys.sort_unstable();
+                        let inner_indent = " ".repeat((depth + 2) * 4);
+                        for ik in scoped_keys {
+                            write!(f, "{inner_indent}{ik} = ")?;
+                            key_scope[ik].pfmt(f, depth + 2)?;
+                            writeln!(f, ",")?;
+                        }
+
+                        writeln!(f, "{next_indent}}},")?;
+                        i = scope_end;
                     }
                 }
 
@@ -143,8 +186,11 @@ pub enum Error {
     #[error("Illegal character '{ch}' at index {pos}")]
     IllegalCharacter { ch: u8, pos: usize },
 
-    #[error("Invalid number: {reason}")]
-    InvalidNumber { reason: &'static str },
+    #[error("Invalid number")]
+    InvalidNumber { pos: usize, cause: String },
+
+    #[error("Number is NaN")]
+    NumberIsNan { pos: usize },
 
     #[error("Invalid UTF-8")]
     InvalidUtf8(#[from] Utf8Error),
@@ -231,13 +277,20 @@ impl<'a> ObjectSyntax<'a> {
             b'"' => self.parse_string(tape, b'"'),
             b'\'' => self.parse_string(tape, b'\''),
             b'-' | b'+' | b'0'..=b'9' => {
-                lexical_core::parse_partial_with_options::<f64, NUM_FORMAT>(
-                    tape.rest(),
-                    &NUM_OPTIONS,
-                )
-                .inspect(|&(_, len)| tape.pos += len)
-                .map(|(n, _)| Object::Number(unsafe { NotNan::new_unchecked(n) }))
-                .map_err(|e| e.into())
+                let pos = tape.pos;
+                let n = str::from_utf8(tape.consume(|ch, _| ch != b'\n'))?.parse::<f64>();
+                if n.is_err() {
+                    return Err(Error::InvalidNumber {
+                        pos,
+                        cause: n.unwrap_err().to_string(),
+                    });
+                }
+                NotNan::new(n.unwrap())
+                    .map_err(|_| Error::InvalidNumber {
+                        pos,
+                        cause: "Number is NaN".to_string(),
+                    })
+                    .map(|n| Object::Number(n))
             }
             b';' => {
                 // same comment style as markup
@@ -334,10 +387,7 @@ impl<'a> ObjectSyntax<'a> {
             // Parse assignment
             if key.chars().last() == Some('.') && tape.cur() == Some(b'{') {
                 tape.dec(); // align with '.'
-                unpack!(
-                    self.parse_map(tape)?,
-                    Object::Map { map: inner }
-                );
+                unpack!(self.parse_map(tape)?, Object::Map { map: inner });
                 for (mut k, v) in inner {
                     // flatten keys
                     k.insert_str(0, key);
