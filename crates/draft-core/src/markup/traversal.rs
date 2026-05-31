@@ -9,6 +9,7 @@ use crate::{
     unpack_token,
 };
 
+//no pretty printing, user can set up formatter in their editor
 macro_rules! visits {
     ($name:ident $(,)?) => {
         paste! {
@@ -24,6 +25,12 @@ macro_rules! visitor {
             fn [< visit_ $name >](&mut self, node: &AstNode<'a>) {
                 ($body as Visitor<'a,_>)(self, node)
             }
+        }
+    };
+    ($name:ident $(,)?) => {
+        paste! {
+            #[inline(always)]
+            fn [< visit_ $name >](&mut self, _: &AstNode<'a>) {}
         }
     };
 }
@@ -118,7 +125,7 @@ pub struct HtmlVisitor {
 
 #[cfg(feature = "to-html")]
 impl HtmlVisitor {
-    #[inline(always)]
+    #[inline]
     pub const fn new() -> Self {
         Self {
             out: String::new(),
@@ -129,10 +136,10 @@ impl HtmlVisitor {
 
 #[cfg(feature = "to-html")]
 impl<'a> AstVisitor<'a> for HtmlVisitor {
-    visitor!(none, |model: &mut AstToHtml, node| {
+    visitor!(none, |model: &mut HtmlVisitor, node| {
         match node.kind {
-            super::parse::NodeKind::Rule(rule_kind) => todo!(),
-            super::parse::NodeKind::Token(token) => todo!(),
+            parse::NodeKind::Rule(rule_kind) => todo!(),
+            parse::NodeKind::Token(token) => todo!(),
         }
     });
 
@@ -199,6 +206,22 @@ impl<'a> AstVisitor<'a> for HtmlVisitor {
     visitor!(horizontal_rule, |model: &mut HtmlVisitor, _| {
         emit!(model, "<hr>");
     });
+
+    visitor!(line_quote, |model: &mut HtmlVisitor, node| {
+        emit!(model, "<blockquote>");
+        model.visit_line(&node[1]);
+        emit!(model, "</blockquote>");
+    });
+
+    visitor!(block_quote, |model: &mut HtmlVisitor, node| {
+        emit!(model, "<blockquote>"); // todo admonition
+        model.visit_line(&node[2]);
+        emit!(model, "</blockquote>");
+    });
+
+    visitor!(line_quote_marker);
+    visitor!(block_quote_open);
+    visitor!(block_quote_close);
 }
 
 /// Transforms an AST into Github-flavored Markdown (GFM)
@@ -209,7 +232,7 @@ pub struct MarkdownVisitor {
 
 #[cfg(feature = "to-markdown")]
 impl MarkdownVisitor {
-    #[inline(always)]
+    #[inline]
     pub const fn new() -> Self {
         Self { out: String::new() }
     }
@@ -262,4 +285,18 @@ impl<'a> AstVisitor<'a> for MarkdownVisitor {
             _ => panic!("Invalid format"),
         }
     });
+
+    visitor!(line_quote, |model: &mut MarkdownVisitor, node| {
+        emit!(model, "> ");
+        model.visit_line(&node[1]);
+        emit!(model, "\n");
+    });
+
+    visitor!(block_quote, |model: &mut MarkdownVisitor, node| {
+        emit!(model, "<blockquote>"); // todo admonition
+        model.visit_line(&node[2]);
+        emit!(model, "</blockquote>");
+    });
+
+    visitor!(line_quote_marker);
 }

@@ -1,5 +1,7 @@
 use std::vec;
 
+use taped::Tape;
+
 use crate::{
     markup::{
         lex::{ListItemKind, ListItemPos, Token, TokenKind as token, TokenSpan},
@@ -316,9 +318,7 @@ impl<'a> Grammar {
     //InferredLink | LinkMarker & linkTarget
     rule!(link, |mut tape| {
         match try_token!(tape, InferredLink) {
-            Some(a) => {
-                Some((node::branch(rule::Link, vec![a], meta::Choice(0)), tape))
-            }
+            Some(a) => Some((node::branch(rule::Link, vec![a], meta::Choice(0)), tape)),
             None => {
                 let a = try_token!(tape, LinkMarker)?;
                 let (b, tape) = Self::link_target(tape)?;

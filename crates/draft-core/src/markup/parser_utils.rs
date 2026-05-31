@@ -1,11 +1,10 @@
-use derive_more::derive::Deref;
+use std::ops::Deref;
 
-use crate::{
-    markup::{
-        lex::{ListItemKind, ListItemPos, Token, TokenKind, TokenSpan},
-        parse::NodeMetadata as meta,
-    },
-    tape::Tape,
+use taped::Tape;
+
+use crate::markup::{
+    lex::{ListItemKind, ListItemPos, Token, TokenKind, TokenSpan},
+    parse::NodeMetadata as meta,
 };
 
 pub type TokenStream<'a> = Tape<'a, TokenSpan<'a>>;
@@ -107,9 +106,8 @@ pub enum NodeMetadata {
 /// Dereferences to its `children` vector.
 ///
 /// `end` is exclusive.
-#[derive(Debug, Clone, PartialEq, Eq, Deref)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AstNode<'a> {
-    #[deref]
     pub children: Vec<AstNode<'a>>,
 
     pub meta: NodeMetadata,
@@ -117,6 +115,14 @@ pub struct AstNode<'a> {
     pub start: usize,
     pub end: usize,
     pub kind: NodeKind<'a>,
+}
+
+impl<'a> Deref for AstNode<'a> {
+    type Target = Vec<AstNode<'a>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.children
+    }
 }
 
 impl<'a> AstNode<'a> {

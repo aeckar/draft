@@ -2,16 +2,17 @@ use std::sync::LazyLock;
 
 use linkify::{LinkFinder, LinkKind};
 use simdutf8::basic::{self, Utf8Error};
+use taped::{CharExt as TapedCharExt, SliceExt as TapedSliceExt, Tape};
 use thiserror::Error;
 
 use crate::{
+    ext::{CharExt, SliceExt},
     markup::{
         config::{DynConf, StaticConf},
         lex::{CheckboxType, InlineFormat, ListItemKind, Numbering, Token, TokenSpan},
     },
     object::{Object, ObjectSyntax},
     prelude::*,
-    tape::Tape,
 };
 
 static LINK_FINDER: LazyLock<LinkFinder> = LazyLock::new(|| {
@@ -283,13 +284,13 @@ impl<'a> Scanner<'a> {
     fn handle_fmt(&mut self, mut tape: Tape<'a, u8>, fmt: InlineFormat) -> Option<Tape<'a, u8>> {
         let start = tape.pos;
         let len = fmt.len();
-        if tape.is_l_clear(start) && !tape.is_r_clear(tape.pos) {
+        if tape.is_left_clear(start) && !tape.is_right_clear(tape.pos) {
             // open
             // lack of lookahead prevents bottleneck
             self.open_fmts.push((fmt, start));
             tape.pos += len - 1;
             return Some(tape);
-        } else if tape.is_r_clear(start)
+        } else if tape.is_right_clear(start)
             && self
                 .open_fmts
                 .last()
@@ -414,12 +415,12 @@ impl<'a> Scanner<'a> {
             // single-line shorthand
             self.emit_inplace(tape, Token::LineQuoteMarker, 2);
             self.pgraph_spacing = 1;
-            tape.pos += 2; // skip over `""`/`''`
+            tape.pos += 2; // consume `""`/`''`
             return Some(tape);
         }
         let delim = &[quote; 3];
         if tape.is_at(delim) {
-            tape.pos += 3; // skip over `"""`/`'''`
+            tape.pos += 3; // consume `"""`/`'''`
             if let Some(&(double, open_pos)) = self.open_quotes.last()
                 && double == (quote == b'"')
             {
@@ -461,16 +462,16 @@ impl<'a> Scanner<'a> {
     fn try_assignment(&mut self, mut tape: Tape<'a, u8>) -> Option<Tape<'a, u8>> {
         let start = tape.pos;
         tape.adv(); // skip `[`
-        tape.consume(|ch, _| ch.is_file_ws());
-        tape.next().filter(|ch| ch.is_file_key_start())?;
+        tape.consume(|ch, _| ch.is_simple_ws());
+        tape.next().filter(|ch| ch.is_key_start())?;
         let key_start = tape.pos;
-        tape.consume(|ch, _| ch.is_file_key_part());
+        tape.consume(|ch, _| ch.is_key_part());
         let key = &tape[key_start..tape.pos];
-        tape.consume(|ch, _| ch.is_file_ws());
+        tape.consume(|ch, _| ch.is_simple_ws());
         tape.next().filter(|&ch| ch == b']')?;
-        tape.consume(|ch, _| ch.is_file_ws());
+        tape.consume(|ch, _| ch.is_simple_ws());
         tape.next().filter(|&ch| ch == b'=')?;
-        tape.consume(|ch, _| ch.is_file_ws());
+        tape.consume(|ch, _| ch.is_simple_ws());
         let (value, len) = ObjectSyntax::new(str::from_utf8(tape.rest()).ok()?)
             .compile()
             .ok()?; // todo warn thru lsp
@@ -555,14 +556,14 @@ impl<'a> Scanner<'a> {
         if !infer_links {
             return None;
         }
-        tape.seek_back(|ch, _| ch.is_file_ws());
+        tape.seek_back(|ch, _| ch.is_simple_ws());
         tape.adv();
         let start = tape.pos;
-        let href = tape.consume(|ch, _| !ch.is_file_ws());
+        let href = tape.consume(|ch, _| !ch.is_simple_ws());
         let link = LINK_FINDER.links(str::from_utf8(href).ok()?).next()?;
         if *link.kind() == LinkKind::Url
             && !link.as_str().contains("//")
-            && !PRE_ICANN_TLD.contains(&link.as_str().as_bytes().tld())
+            && !PRE_ICANN_TLD.contains(&link.as_str().as_bytes().tld()?)
         {
             return None;
         }
@@ -582,7 +583,7 @@ impl<'a> Scanner<'a> {
             tape.adv(); // skip '-'
             let marker = tape[tape.pos];
             if marker == b'o' || marker == b'x' {
-                tape.peek().filter(|ch| ch.is_file_ws())?;
+                tape.peek().filter(|ch| ch.is_simple_ws())?;
             }
             self.emit_inplace(
                 tape,
@@ -601,7 +602,7 @@ impl<'a> Scanner<'a> {
             if tape
                 .consume(|ch, _| ch != b'\n')
                 .iter()
-                .all(|ch| ch.is_file_ws())
+                .all(|ch| ch.is_simple_ws())
             {
                 self.emit_inplace(tape, Token::HorizontalRule, 3);
                 tape.dec();
@@ -653,7 +654,7 @@ impl<'a> Scanner<'a> {
             if !tape.is_cur_prefix() {
                 return None;
             }
-            tape.pos += 2; // skip over '$$'
+            tape.pos += 2; // consume '$$'
             let body_start = tape.pos + 1;
             if !tape.seek_ch3(b'\n', b'$', b'$') {
                 // failed lookahead
@@ -695,7 +696,7 @@ impl<'a> Scanner<'a> {
             if !tape.is_cur_prefix() {
                 return None;
             }
-            tape.pos += 3; // skip over '```'
+            tape.pos += 3; // consume '```'
             let lang = tape.consume(|ch, _| ch != b'\n');
             let body_start = tape.pos + 1; // after '\n'
             if !tape.seek_at(b"\n```") {
@@ -705,7 +706,7 @@ impl<'a> Scanner<'a> {
             self.emit(
                 Token::CodeBlock {
                     body: &tape[body_start..tape.pos],
-                    lang: lang.trim_file_ws(),
+                    lang: lang.trim_simple_ws(),
                 },
                 start,
                 tape.pos + 1,
@@ -714,11 +715,11 @@ impl<'a> Scanner<'a> {
             return Some(tape);
         }
         if tape.is_at(b"``") {
-            tape.adv(); // skip over first '`' of open
+            tape.adv(); // consume first '`' of open
             if !tape.seek_at_in_pgraph(spacing, b"``") {
                 return Some(tape); // stop at 2nd '`'; treat as text
             }
-            tape.adv(); // skip over first '`' of closer
+            tape.adv(); // consume first '`' of closer
             self.emit(
                 Token::InlineRawCode {
                     body: &tape[start + 2..tape.pos],

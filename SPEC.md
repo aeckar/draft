@@ -4,3 +4,4 @@
 
 
 private constants/helpers are top-level
+tostring conversions done lazily, operations done on bytes

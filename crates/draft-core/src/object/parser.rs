@@ -1,21 +1,10 @@
 use std::{collections::HashMap, fmt::Display, str::Utf8Error};
 
-use lexical_core::{format, parse_float_options::Options};
 use ordered_float::NotNan;
 use thiserror::Error;
 use unindent::unindent;
 
 use crate::{prelude::*, unpack};
-
-const NUM_FORMAT: u128 = format::STANDARD;
-const NUM_OPTIONS: Options = Options::builder()
-    .decimal_point(b'.')
-    .inf_string(Some(b"inf"))
-    .infinity_string(Some(b"infinity"))
-    .exponent(b'e')
-    .lossy(false) // greater accuracy, slower on precise numbers
-    .nan_string(None)
-    .build_strict();
 
 /// An instance of a data object.
 ///
@@ -33,6 +22,12 @@ const NUM_OPTIONS: Options = Options::builder()
 /// The `fmt` (and as a result, `to_string`) implementations emit the
 /// most concise object notation possible. Pretty printing is supported via the
 /// `pfmt` and `to_pstring` functions. Strings are always enclosed using `"`.
+///
+/// # Implementation
+///
+/// Canonical representation of data objects is determined first by readability,
+/// then by conciseness, and finally by orthogonality. For example, list items
+/// are presented on their own line, which makes them most easily recognized.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Object {
     Null,
@@ -40,10 +35,7 @@ pub enum Object {
     Number(NotNan<f64>),
     String(String),
     List(Vec<Object>),
-    Map {
-        tag: String,
-        map: HashMap<String, Object>,
-    },
+    Map { map: HashMap<String, Object> },
 }
 
 impl Display for Object {
@@ -55,17 +47,21 @@ impl Display for Object {
             Self::String(str) => write!(f, "\"{str}\""),
             Self::List(items) => {
                 write!(f, "{{")?;
-                for item in items {
+                for (idx, item) in items.iter().enumerate() {
                     write!(f, "{item}")?;
-                    write!(f, ",")?;
+                    if idx != items.len() - 1 {
+                        write!(f, ",")?;
+                    }
                 }
                 write!(f, "}}")
             }
-            Self::Map { tag, map } => {
-                write!(f, "{tag}.{{")?;
-                for (key, val) in map {
-                    write!(f, "{key}:{val}")?;
-                    write!(f, ",")?;
+            Self::Map { map } => {
+                write!(f, ".{{")?;
+                for (idx, (key, val)) in map.iter().enumerate() {
+                    write!(f, "{key}={val}")?;
+                    if idx != map.len() - 1 {
+                        write!(f, ",")?;
+                    }
                 }
                 write!(f, "}}")
             }
@@ -74,18 +70,21 @@ impl Display for Object {
     }
 }
 
+struct Name {
+    
+}
 impl Object {
     pub fn to_pstring(&self) -> String {
         let mut buf = String::new();
         // Start with 0 indentation
         self.pfmt(&mut buf, 0).unwrap();
         buf
+        l;
     }
-
-    pub fn pfmt(&self, f: &mut dyn std::fmt::Write, indent: usize) -> std::fmt::Result {
-        let space = " ".repeat(indent * 4); // 4-space indent
-        let next_space = " ".repeat((indent + 1) * 4);
-
+    
+    pub fn pfmt(&self, f: &mut dyn std::fmt::Write, depth: usize) -> std::fmt::Result {
+        let indent = " ".repeat(depth * 4);
+        let next_indent = " ".repeat((depth + 1) * 4);
         match self {
             Self::Null => write!(f, "null"),
             Self::Bool(b) => write!(f, "{b}"),
@@ -97,23 +96,38 @@ impl Object {
                 }
                 writeln!(f, "{{")?;
                 for item in items {
-                    write!(f, "{next_space}")?;
-                    item.pfmt(f, indent + 1)?;
-                    writeln!(f, ",")?;
+                    write!(f, "{next_indent}")?;
+                    item.pfmt(f, depth + 1)?;
+                    writeln!(f, ",")?; // use trailing comma
                 }
-                write!(f, "{space}}}")
+                write!(f, "}}")
             }
-            Self::Map { tag, map } => {
+            Self::Map { map } => {
                 if map.is_empty() {
-                    return write!(f, "{tag}.{{}}");
+                    return write!(f, ".{{}}");
                 }
-                writeln!(f, "{tag}.{{")?;
-                for (key, val) in map {
-                    write!(f, "{next_space}\"{key}\": ")?;
-                    val.pfmt(f, indent + 1)?;
-                    writeln!(f, ",")?;
+                if map.len() == 1 {
+                    let (key, val)=map.iter().next().unwrap();
+                    write!(f, ".{{\n{next_indent}{key} = ")?;
+                    val.pfmt(f, depth + 1)?;
+                    return write!(f, ",\n{indent}}}"); // use trailing comma
                 }
-                write!(f, "{space}}}")
+                let mut groups: Vec<Vec<&str>> = Vec::with_capacity(map.len());
+                groups.push(map.keys().map(|s| s.as_str()).collect());
+                while groups.len() < groups.capacity() {
+                    let pool = &groups[0];
+                    let Some((a_pre, a_rest)) = groups[groups.len() - 1][0].split_once('.') else {
+
+                        continue;
+                    };
+                    for key in &pool[1..] {
+                        if key.starts_with(prefix) {
+                            
+                        }
+                    }
+                }
+
+                write!(f, "{indent}}}")
             }
         }
     }
@@ -128,8 +142,8 @@ pub enum Error {
     #[error("Illegal character '{ch}' at index {pos}")]
     IllegalCharacter { ch: u8, pos: usize },
 
-    #[error("{_0}")]
-    InvalidNumber(#[from] lexical_core::Error),
+    #[error("Invalid number: {reason}")]
+    InvalidNumber { reason: &'static str },
 
     #[error("Invalid UTF-8")]
     InvalidUtf8(#[from] Utf8Error),
@@ -158,7 +172,7 @@ pub struct ObjectSyntax<'a> {
 }
 
 impl<'a> Compile for ObjectSyntax<'a> {
-    type Output = Result<(Object, usize), Error>;
+    type Output = Result<Object, Error>;
 
     fn compile(self) -> Self::Output {
         self.parse_any(&mut Tape::new(self.input))
@@ -197,21 +211,15 @@ impl<'a> ObjectSyntax<'a> {
         }
         if tape.is_at(b"inf") {
             tape.pos += "inf".len();
-            return Ok(Object::Number(unsafe { NotNan::new_unchecked(f64::INFINITY) }));
+            return Ok(Object::Number(unsafe {
+                NotNan::new_unchecked(f64::INFINITY)
+            }));
         }
         if tape.is_at(b"infinity") {
             tape.pos += "infinity".len();
-            return Ok(Object::Number(unsafe { NotNan::new_unchecked(f64::INFINITY) }));
-        }
-
-        // (Possibly tagged) Map
-        let tag = tape.consume_file_key();
-        if !tag.is_empty() {
-            if tape.cur() != Some(b'{') {
-                let pos = tape.pos;
-                return Err(DataError::IllegalCharacter { ch: tape[pos], pos });
-            }
-            return Ok(self.parse_obj(tape, str::from_utf8(tag)?.to_string()));
+            return Ok(Object::Number(unsafe {
+                NotNan::new_unchecked(f64::INFINITY)
+            }));
         }
 
         // Everything else
@@ -311,20 +319,32 @@ impl<'a> ObjectSyntax<'a> {
                 });
             }
             let ch = tape[tape.pos];
-
-            // Check if end is reached
             if ch == b'}' {
                 tape.adv();
                 break;
             }
 
             // Get key
-            let key = tape.consume_file_key();
+            let key = str::from_utf8(tape.consume_file_key())?;
             if key.is_empty() {
-                return Err(Error::IllegalCharacter { ch, pos: tape.pos })
+                return Err(Error::IllegalCharacter { ch, pos: tape.pos });
+                k
             }
 
             // Parse assignment
+            if key.chars().last() == Some('.') && tape.cur() == Some(b'{') {
+                tape.dec(); // align with '.'
+                unpack!(
+                    self.parse_map(tape, key.to_string())?,
+                    Object::Map { map: inner }
+                );
+                for (mut k, v) in inner {
+                    // flatten keys
+                    k.insert_str(0, key);
+                    map.insert(k, v);
+                }
+                continue;
+            }
             tape.consume(|ch, _| ch.is_file_ws());
             if tape.cur() != Some(b'=') {
                 return Err(Error::IllegalCharacter {
@@ -334,12 +354,9 @@ impl<'a> ObjectSyntax<'a> {
             }
             tape.adv(); // skip '='
             tape.consume(|ch, _| ch.is_file_ws());
-            let (value, _) = self.parse_any(tape)?;
-
-
-            map.insert(key, value);
+            map.insert(key.to_string(), self.parse_any(tape)?);
         }
-        Ok(Object::Map { tag, map })
+        Ok(Object::Map { map })
     }
 
     #[must_use]
@@ -358,8 +375,7 @@ impl<'a> ObjectSyntax<'a> {
                     open_pos: tape.pos,
                 });
             }
-            let (value, _) = self.parse_any(tape)?;
-            items.push(value);
+            items.push(self.parse_any(tape)?);
             tape.consume(|ch, _| ch.is_file_ws() || ch == b'\n');
             if tape.cur() == Some(b',') {
                 tape.adv();

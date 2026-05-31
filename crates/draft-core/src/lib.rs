@@ -10,12 +10,11 @@
 #![feature(macro_metavar_expr)]
 mod compile;
 mod ext;
-mod tape;
 
 #[cfg(feature = "parse-markup")]
 pub mod markup;
 
-#[cfg(feature = "parse-data")]
+#[cfg(feature = "parse-object")]
 pub mod object;
 
 #[cfg(feature = "macros")]
@@ -25,7 +24,7 @@ pub mod macros;
 pub mod formatter;
 
 pub mod prelude {
-    pub use super::{compile::*, ext::*, tape::*};
+    pub use super::{compile::*, ext::*};
 }
 
 /// Unpacks a struct-like enum variant from a value, asserting that
