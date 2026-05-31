@@ -6,12 +6,12 @@ use taped::{CharExt as TapedCharExt, SliceExt as TapedSliceExt, Tape};
 use thiserror::Error;
 
 use crate::{
-    ext::{CharExt, SliceExt},
+    ext::SliceExt,
     markup::{
         config::{DynConf, StaticConf},
         lex::{CheckboxType, InlineFormat, ListItemKind, Numbering, Token, TokenSpan},
     },
-    object::{Object, ObjectSyntax},
+    object::Object,
     prelude::*,
 };
 
@@ -121,7 +121,6 @@ impl<'a> MarkupSyntax<'a> {
                 b']' => scan.handle_cbrac(tape),
                 b'=' => scan.handle_equals(tape),
                 b'"' | b'\'' => scan.handle_quote(tape, tape[tape.pos]),
-                b'{' => scan.handle_curly(tape),
                 b'\\' => scan.handle_bslash(tape),
                 b';' => {
                     // divider comment ';;' handled by editor
@@ -269,8 +268,6 @@ impl<'a> Scanner<'a> {
         self.tokens
             .push(TokenSpan::new(token, tape.pos, tape.pos + len));
     }
-
-    fn handle_curly(&mut self, mut tape: Tape<'a, u8>) {}
 
     /// Attempts to emit a token if the character cluster
     /// belongs to a flanking token, such as an inline format or link.
@@ -441,9 +438,6 @@ impl<'a> Scanner<'a> {
         if self.in_alt_text {
             return None;
         }
-        if let Some(tape) = self.try_assignment(tape) {
-            return Some(tape);
-        }
         tape.adv(); // skip '['
         tape.poll_in_pgraph(self.pgraph_spacing, |ch, pos| {
             let next = tape[pos + 1];
@@ -456,36 +450,6 @@ impl<'a> Scanner<'a> {
         }
         self.in_alt_text = true;
         Some(tape)
-    }
-
-    #[must_use]
-    fn try_assignment(&mut self, mut tape: Tape<'a, u8>) -> Option<Tape<'a, u8>> {
-        let start = tape.pos;
-        tape.adv(); // skip `[`
-        tape.consume(|ch, _| ch.is_simple_ws());
-        tape.next().filter(|ch| ch.is_key_start())?;
-        let key_start = tape.pos;
-        tape.consume(|ch, _| ch.is_key_part());
-        let key = &tape[key_start..tape.pos];
-        tape.consume(|ch, _| ch.is_simple_ws());
-        tape.next().filter(|&ch| ch == b']')?;
-        tape.consume(|ch, _| ch.is_simple_ws());
-        tape.next().filter(|&ch| ch == b'=')?;
-        tape.consume(|ch, _| ch.is_simple_ws());
-        let (value, len) = ObjectSyntax::new(str::from_utf8(tape.rest()).ok()?)
-            .compile()
-            .ok()?; // todo warn thru lsp
-        tape.pos += len;
-        self.emit(
-            Token::Assignment {
-                key,
-                value_idx: self.data_values.len(),
-            },
-            start,
-            tape.pos,
-        );
-        self.data_values.push(value);
-        Some(tape) // allow trailing tokens
     }
 
     /// Resolves whether a ']' character belongs to a link body, an embed body, or plain text.
@@ -766,7 +730,7 @@ impl<'a> Scanner<'a> {
         }
         let start = tape.pos; // keep for macro handle token
         tape.adv(); // skip past '\'
-        let name = tape.consume_file_key();
+        let name = tape.consume_key();
         if name.len() == 0 {
             // treat as escape
             return Some(tape); // stop at the character after '\'
@@ -790,7 +754,7 @@ impl<'a> Scanner<'a> {
             }
             tape.adv(); // skip past ')'
             self.emit(
-                Token::MacroDeco {
+                Token::MacroDecor {
                     body: &tape[next_pos + 1..tape.pos],
                 },
                 next_pos,

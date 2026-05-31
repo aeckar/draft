@@ -1,3 +1,5 @@
+use taped::Tape;
+
 #[derive(Copy, Clone)]
 struct CharType(u8);
 
@@ -106,5 +108,28 @@ impl<'a> SliceExt<'a> for &'a [u8] {
             }
         }
         None
+    }
+}
+
+pub trait TapeExt<'a> {
+    /// Consumes the object let notation key at the current position,
+    /// returning it if one exists.
+    /// 
+    /// If one does not exist, an empty slice is returned.
+    ///
+    /// See `CharExt` for more details.
+    fn consume_key(&mut self) -> &'a [u8];
+}
+
+impl<'a> TapeExt<'a> for Tape<'a, u8> {
+    fn consume_key(&mut self) -> &'a [u8] {
+        if self.cur().is_none_or(|ch| !ch.is_key_start()) {
+            return &self[0..0];
+        }
+
+        let start = self.pos;
+        self.adv();
+        let rest_len = self.consume(|ch, _| ch.is_key_part()).len();
+        &self[start..start + 1 + rest_len]
     }
 }

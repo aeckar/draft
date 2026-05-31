@@ -1,6 +1,7 @@
 use std::{collections::HashMap, fmt::Display, str::Utf8Error};
 
 use ordered_float::NotNan;
+use taped::{CharExt, Tape};
 use thiserror::Error;
 use unindent::unindent;
 
@@ -225,7 +226,7 @@ impl<'a> ObjectSyntax<'a> {
         // Everything else
         let ch = tape.cur().unwrap();
         match ch {
-            b'.' => self.parse_map(tape, "".to_string()),
+            b'.' => self.parse_map(tape),
             b'{' => self.parse_list(tape),
             b'"' => self.parse_string(tape, b'"'),
             b'\'' => self.parse_string(tape, b'\''),
@@ -293,7 +294,7 @@ impl<'a> ObjectSyntax<'a> {
     }
 
     #[must_use]
-    fn parse_map(&self, tape: &mut Tape<'a, u8>, tag: String) -> Result<Object, Error> {
+    fn parse_map(&self, tape: &mut Tape<'a, u8>) -> Result<Object, Error> {
         tape.adv(); // skip '.'
         if tape.cur() != Some(b'{') {
             // should not be checked beforehand
@@ -304,11 +305,11 @@ impl<'a> ObjectSyntax<'a> {
         }
         let open_pos = tape.pos;
         tape.adv(); // skip '{'
-        tape.consume(|ch, _| ch.is_file_ws());
+        tape.consume(|ch, _| ch.is_simple_ws());
         let mut map = HashMap::new();
         loop {
             // Allow leading, trailing, and mixed/chained delimiters
-            tape.consume(|ch, _| ch.is_file_ws() || ch == b'\n' || ch == b',');
+            tape.consume(|ch, _| ch.is_simple_ws() || ch == b'\n' || ch == b',');
 
             // Get current character
             if tape.cur().is_none() {
@@ -325,17 +326,16 @@ impl<'a> ObjectSyntax<'a> {
             }
 
             // Get key
-            let key = str::from_utf8(tape.consume_file_key())?;
+            let key = str::from_utf8(tape.consume_key())?;
             if key.is_empty() {
                 return Err(Error::IllegalCharacter { ch, pos: tape.pos });
-                k
             }
 
             // Parse assignment
             if key.chars().last() == Some('.') && tape.cur() == Some(b'{') {
                 tape.dec(); // align with '.'
                 unpack!(
-                    self.parse_map(tape, key.to_string())?,
+                    self.parse_map(tape)?,
                     Object::Map { map: inner }
                 );
                 for (mut k, v) in inner {
@@ -345,7 +345,7 @@ impl<'a> ObjectSyntax<'a> {
                 }
                 continue;
             }
-            tape.consume(|ch, _| ch.is_file_ws());
+            tape.consume(|ch, _| ch.is_simple_ws());
             if tape.cur() != Some(b'=') {
                 return Err(Error::IllegalCharacter {
                     ch: tape.cur().unwrap_or(0),
@@ -353,7 +353,7 @@ impl<'a> ObjectSyntax<'a> {
                 });
             }
             tape.adv(); // skip '='
-            tape.consume(|ch, _| ch.is_file_ws());
+            tape.consume(|ch, _| ch.is_simple_ws());
             map.insert(key.to_string(), self.parse_any(tape)?);
         }
         Ok(Object::Map { map })
@@ -363,7 +363,7 @@ impl<'a> ObjectSyntax<'a> {
     fn parse_list(&self, tape: &mut Tape<'a, u8>) -> Result<Object, Error> {
         let mut items = vec![];
         loop {
-            tape.consume(|ch, _| ch.is_file_ws() || ch == b'\n');
+            tape.consume(|ch, _| ch.is_simple_ws() || ch == b'\n');
             if tape.cur() == Some(b'}') {
                 tape.adv();
                 break;
@@ -376,7 +376,7 @@ impl<'a> ObjectSyntax<'a> {
                 });
             }
             items.push(self.parse_any(tape)?);
-            tape.consume(|ch, _| ch.is_file_ws() || ch == b'\n');
+            tape.consume(|ch, _| ch.is_simple_ws() || ch == b'\n');
             if tape.cur() == Some(b',') {
                 tape.adv();
             } else if tape.cur() != Some(b'}') {

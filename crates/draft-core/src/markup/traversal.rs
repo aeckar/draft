@@ -2,7 +2,7 @@ use pastey::paste;
 
 use crate::{
     markup::{
-        lex::{InlineFormat, ListItemKind},
+        lex::InlineFormat,
         parse::{AstNode, SymbolKind},
         traversal_utils::Visitor,
     },

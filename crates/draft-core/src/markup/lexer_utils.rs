@@ -205,14 +205,13 @@ pub enum Token<'a> {
     LineQuoteMarker,
     BlockQuoteOpen,
     BlockQuoteClose,
-    MacroDeco { body: &'a [u8] },   // ( )
+    MacroDecor { body: &'a [u8] },  // ( )
     MacroConfig { body: &'a [u8] }, // [ ]
     MacroBody { body: &'a [u8] },   // { }
     HeadingMarker { depth: u8 },
     CodeBlock { body: &'a [u8], lang: &'a [u8] },
     MathBlock { body: &'a [u8] },
     ListItemMarker { indent: u8, kind: ListItemKind },
-    Assignment { key: &'a [u8], value_idx: usize },
     Eof, // necessary to find bound for trailing plaintext; pruned before parsing
 }
 
