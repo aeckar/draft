@@ -379,22 +379,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "dcon"
-version = "0.1.0"
-
-[[package]]
 name = "dcon-core"
 version = "0.1.0"
 dependencies = [
  "derive_more",
+ "ordered-float",
+ "regex",
+ "serde",
+ "serde_json",
  "strum",
+ "taped",
  "thiserror",
  "typeof-literal",
+ "unindent",
 ]
-
-[[package]]
-name = "dcon-macros"
-version = "0.1.0"
 
 [[package]]
 name = "deranged"
@@ -460,18 +458,13 @@ dependencies = [
  "indoc",
  "linkify",
  "mime_guess",
- "ordered-float",
  "pastey",
  "pulldown-cmark",
- "regex",
- "serde",
- "serde_json",
  "simdutf8",
  "strum",
  "taped",
  "thiserror",
  "typeof-literal",
- "unindent",
  "video-url-validator",
 ]
 

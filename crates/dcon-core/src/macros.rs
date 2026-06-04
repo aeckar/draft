@@ -41,7 +41,7 @@ use std::sync::LazyLock;
 use ordered_float::NotNan;
 use regex::Regex;
 
-use crate::object::Object;
+use crate::Object;
 
 pub static ANY_STRING: LazyLock<Regex> = LazyLock::new(|| Regex::new(".*").unwrap());
 

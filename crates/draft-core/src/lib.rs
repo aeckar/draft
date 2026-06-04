@@ -10,14 +10,10 @@
 //! is used many times in the same file. Use of star import, except for `use crate::prelude::*`,
 //! is discouraged.
 #![feature(macro_metavar_expr)]
-mod compile;
 mod ext;
 
-#[cfg(feature = "parse-markup")]
+#[cfg(feature = "parse-markup")]    // fixme should this be here???
 pub mod markup;
-
-#[cfg(feature = "parse-object")]
-pub mod object;
 
 #[cfg(feature = "macros")]
 pub mod macros;
@@ -26,7 +22,7 @@ pub mod macros;
 pub mod formatter;
 
 pub mod prelude {
-    pub use super::{compile::*, ext::*};
+    pub use super::{ext::*};
 }
 
 /// Unpacks a struct-like enum variant from a value, asserting that

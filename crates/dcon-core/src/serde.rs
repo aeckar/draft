@@ -6,7 +6,7 @@ use serde::{
     de::{MapAccess, SeqAccess, Visitor},
 };
 
-use crate::object::Object;
+use crate::Object;
 
 impl Serialize for Object {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

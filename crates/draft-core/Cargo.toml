@@ -51,17 +51,14 @@ csv = { version = "1.4.0", optional = true }
 default = ["full"] # todo change to "parse-markup" after implementation 
 full = [
     "parse-markup",
-    "parse-object",
     "formatter",
     "to-html",
     "to-markdown",
     "from-markdown",
     "macros",
-    "serde",
 ]
 
-parse-markup = ["parse-object", "dep:strum"]
-parse-object = ["dep:unindent"]
+parse-markup = ["dep:strum"]
 formatter = []
 to-html = [
     "parse-markup",
@@ -73,7 +70,6 @@ to-html = [
 to-markdown = ["macros", "parse-markup"]
 from-markdown = ["parse-markup", "dep:pulldown-cmark"]
 macros = ["dep:boa_engine", "dep:csv"]
-serde = ["parse-object", "dep:serde", "dep:serde_json"]
 
 [lib]
 path = "src/lib.rs"

@@ -1,3 +1,4 @@
+//! All `parse_X` functions assume cursor is at a valid character.
 use std::{collections::HashMap, fmt::Display, str::Utf8Error};
 
 use ordered_float::{FloatIsNan, NotNan};
@@ -7,7 +8,7 @@ use taped::{CharExt, Tape, ToTape};
 use thiserror::Error;
 use unindent::unindent;
 
-use crate::{prelude::*, unpack};
+use crate::prelude::*;
 
 /// A not-NaN floating-point representation used for storing numbers in object notation.
 pub type Number = NotNan<f64>;
@@ -57,6 +58,32 @@ pub struct InvalidKey {
     pos: usize,
 }
 
+/// Describes and locates a specific error in object notation syntax.
+#[derive(Error, Debug, Clone)]
+pub enum Error {
+    #[error("Expected a value at index {pos}")]
+    MissingValue { pos: usize },
+
+    #[error("Illegal character '{ch}' at index {pos}")]
+    IllegalCharacter { ch: u8, pos: usize },
+
+    #[error("Invalid number")]
+    InvalidNumber { pos: usize, cause: String },
+
+    #[error("Number is NaN")]
+    NumberIsNan { pos: usize },
+
+    #[error("Invalid UTF-8")]
+    InvalidUtf8(#[from] Utf8Error),
+
+    #[error("Expected a closing '{close}' for '{open}' at {open_pos}")]
+    MissingCloser {
+        open: u8,
+        close: u8,
+        open_pos: usize,
+    },
+}
+
 /// An instance of a data object.
 ///
 /// Roughly reflects JSON data types. Numbers **must** start with a digit, `+`, or `-`.
@@ -83,6 +110,9 @@ pub struct InvalidKey {
 /// No strict size limits are enforced for strings, lists, and maps.
 /// This is done to maintain simplicity, and is unlikely to be an issue in real-world examples
 /// as configurations are terse by design.
+///
+/// Since object notation is relatively small compared to markup, we skip `simdutf8`
+/// for UTF-8 validation. Instead, we give callers that responsibility (except for slices).
 #[derive(Debug, Clone, PartialEq, Eq, EnumDiscriminants, derive_more::From)]
 #[strum_discriminants(name(ObjectKind))]
 pub enum Object {
@@ -96,7 +126,7 @@ pub enum Object {
 
 /// Not intended for 64-bit or 128-bit integers,
 /// since they do not support lossless conversion to `f64`.
-/// 
+///
 /// To convert these into [Object][`crate::object::Object`],
 /// users must convert to `f64` first (possibly lossy).
 macro_rules! impl_from_exact_int {
@@ -179,6 +209,214 @@ impl Display for Object {
 }
 
 impl Object {
+    pub fn new(notation: &str) -> Result<Self, Error> {
+        Self::parse_any(&mut notation.as_bytes().to_tape())
+    }
+
+    #[must_use]
+    fn parse_any(tape: &mut Tape<'_, u8>) -> Result<Object, Error> {
+        let start = tape.pos;
+
+        // Trivial cases
+        if tape.cur().is_none() {
+            return Err(Error::MissingValue { pos: start });
+        }
+        if tape.is_at(b"true") {
+            tape.pos += "true".len();
+            return Ok(Object::Bool(true));
+        }
+        if tape.is_at(b"false") {
+            tape.pos += "false".len();
+            return Ok(Object::Bool(false));
+        }
+        if tape.is_at(b"null") {
+            tape.pos += "null".len();
+            return Ok(Object::Null);
+        }
+        if tape.is_at(b"inf") {
+            tape.pos += "inf".len();
+            return Ok(Object::Number(unsafe {
+                NotNan::new_unchecked(f64::INFINITY)
+            }));
+        }
+        if tape.is_at(b"infinity") {
+            tape.pos += "infinity".len();
+            return Ok(Object::Number(unsafe {
+                NotNan::new_unchecked(f64::INFINITY)
+            }));
+        }
+
+        // Everything else
+        let ch = tape.cur().unwrap();
+        match ch {
+            b'{' => Self::parse_map(tape),
+            b'[' => Self::parse_list(tape),
+            b'"' => Self::parse_string(tape, b'"'),
+            b'\'' => Self::parse_string(tape, b'\''),
+            b'-' | b'+' | b'0'..=b'9' => {
+                let pos = tape.pos;
+                let n = str::from_utf8(tape.consume(|ch, _| ch != b'\n'))?.parse::<f64>();
+                if n.is_err() {
+                    return Err(Error::InvalidNumber {
+                        pos,
+                        cause: n.unwrap_err().to_string(),
+                    });
+                }
+                NotNan::new(n.unwrap())
+                    .map_err(|_| Error::InvalidNumber {
+                        pos,
+                        cause: "Number is NaN".to_string(),
+                    })
+                    .map(|n| Object::Number(n))
+            }
+            b';' => {
+                // same comment style as markup
+                Err(Error::MissingValue { pos: start })
+            }
+            _ => Err(Error::IllegalCharacter { ch, pos: start }),
+        }
+    }
+
+    /// Parse a single- or multi-line quoted string.
+    ///
+    /// Advances `tape` past the closing delimiter.
+    /// Supports `\"` / `\'` escape sequences; a raw newline is legal inside
+    /// the string (multiline mode).  When a newline is found, the raw body is
+    /// fed through `process_multiline_string` to strip common indentation
+    /// and surrounding blank lines.
+    #[must_use]
+    fn parse_string(tape: &mut Tape<'_, u8>, delim: u8) -> Result<Object, Error> {
+        let open_pos = tape.pos;
+        tape.adv(); // skip opening delimiter
+        let body_start = tape.pos;
+        let mut escaped = false;
+        loop {
+            match tape.cur() {
+                None => {
+                    return Err(Error::MissingCloser {
+                        open: delim,
+                        close: delim,
+                        open_pos,
+                    });
+                }
+                Some(b'\\') => {
+                    escaped = !escaped; // cancels escape on next byte
+                    tape.adv();
+                }
+                Some(ch) if ch == delim && !escaped => {
+                    // found the unescaped closing delimiter
+                    let raw = std::str::from_utf8(&tape[body_start..tape.pos])?;
+                    let value = if raw.contains('\n') {
+                        // multiline: strip common indent and surrounding blank lines
+                        Object::String(unindent(raw))
+                    } else {
+                        Object::String(raw.to_owned())
+                    };
+                    tape.adv(); // skip closing delimiter
+                    return Ok(value);
+                }
+                _ => {
+                    escaped = false;
+                    tape.adv();
+                }
+            }
+        }
+    }
+
+    #[must_use]
+    fn parse_map(tape: &mut Tape<'_, u8>) -> Result<Object, Error> {
+        if tape.cur() != Some(b'{') {
+            // should not be checked beforehand
+            return Err(Error::IllegalCharacter {
+                ch: tape.cur().unwrap_or(0),
+                pos: tape.pos,
+            });
+        }
+        let open_pos = tape.pos;
+        tape.adv(); // skip '{'
+        tape.consume(|ch, _| ch.is_simple_ws());
+        let mut map = HashMap::new();
+        loop {
+            // Allow leading, trailing, and mixed/chained delimiters
+            tape.consume(|ch, _| ch.is_simple_ws() || ch == b'\n' || ch == b',');
+
+            // Get current character
+            if tape.cur().is_none() {
+                return Err(Error::MissingCloser {
+                    open: b'{',
+                    close: b'}',
+                    open_pos,
+                });
+            }
+            let ch = tape[tape.pos];
+            if ch == b'}' {
+                tape.adv();
+                break;
+            }
+
+            // Get key
+            let key = str::from_utf8(tape.consume_key())?;
+            if key.is_empty() {
+                return Err(Error::IllegalCharacter { ch, pos: tape.pos });
+            }
+
+            // Parse assignment
+            if key.chars().last() == Some('.') && tape.cur() == Some(b'{') {
+                tape.dec(); // align with '.'
+                let Object::Map(inner) = Self::parse_map(tape)? else {
+                    unreachable!()
+                };
+                for (mut k, v) in inner {
+                    // flatten keys
+                    k.0.insert_str(0, key);
+                    map.insert(k, v);
+                }
+                continue;
+            }
+            tape.consume(|ch, _| ch.is_simple_ws());
+            if tape.cur() != Some(b':') {
+                return Err(Error::IllegalCharacter {
+                    ch: tape.cur().unwrap_or(0),
+                    pos: tape.pos,
+                });
+            }
+            tape.adv(); // skip ':'
+            tape.consume(|ch, _| ch.is_simple_ws());
+            map.insert(Key(key.to_owned()), Self::parse_any(tape)?);
+        }
+        Ok(Object::Map(map))
+    }
+
+    #[must_use]
+    fn parse_list(tape: &mut Tape<'_, u8>) -> Result<Object, Error> {
+        let mut items = vec![];
+        loop {
+            tape.consume(|ch, _| ch.is_simple_ws() || ch == b'\n');
+            if tape.cur() == Some(b']') {
+                tape.adv();
+                break;
+            }
+            if tape.cur().is_none() {
+                return Err(Error::MissingCloser {
+                    open: b'[',
+                    close: b']',
+                    open_pos: tape.pos,
+                });
+            }
+            items.push(Self::parse_any(tape)?);
+            tape.consume(|ch, _| ch.is_simple_ws() || ch == b'\n');
+            if tape.cur() == Some(b',') {
+                tape.adv();
+            } else if tape.cur() != Some(b']') {
+                return Err(Error::IllegalCharacter {
+                    ch: tape.cur().unwrap_or(0),
+                    pos: tape.pos,
+                });
+            }
+        }
+        Ok(Object::List(items))
+    }
+
     pub fn to_pstring(&self) -> String {
         let mut buf = String::new();
         self.pfmt(&mut buf, 0).unwrap();
@@ -275,267 +513,5 @@ impl Object {
                 write!(f, "{indent}}}")
             }
         }
-    }
-}
-
-/// Describes and locates a specific error in object notation syntax.
-#[derive(Error, Debug, Clone)]
-pub enum Error {
-    #[error("Expected a value at index {pos}")]
-    MissingValue { pos: usize },
-
-    #[error("Illegal character '{ch}' at index {pos}")]
-    IllegalCharacter { ch: u8, pos: usize },
-
-    #[error("Invalid number")]
-    InvalidNumber { pos: usize, cause: String },
-
-    #[error("Number is NaN")]
-    NumberIsNan { pos: usize },
-
-    #[error("Invalid UTF-8")]
-    InvalidUtf8(#[from] Utf8Error),
-
-    #[error("Expected a closing '{close}' for '{open}' at {open_pos}")]
-    MissingCloser {
-        open: u8,
-        close: u8,
-        open_pos: usize,
-    },
-}
-
-/// Object notation syntax.
-///
-/// On success, calling `compile` returns the decoded data and the number of bytes read.
-///
-/// # Implementation
-/// Since object notation is relatively small compared to markup, we skip `simdutf8`
-/// for UTF-8 validation. Instead, we give callers that responsibility (except for slices).
-pub struct ObjectSyntax<'a> {
-    /// The input text.
-    pub input: &'a [u8],
-
-    /// If true, expressions are allowed
-    pub expr_mode: bool,
-}
-
-impl<'a> Compile for ObjectSyntax<'a> {
-    type Output = Result<Object, Error>;
-
-    fn compile(self) -> Self::Output {
-        self.parse_any(&mut Tape::new(self.input))
-    }
-}
-
-/// All `parse_X` functions assume cursor is at a valid character.
-impl<'a> ObjectSyntax<'a> {
-    #[must_use]
-    pub fn new(input: &'a str, expr_mode: bool) -> Self {
-        Self {
-            input: input.as_bytes(),
-            expr_mode,
-        }
-    }
-
-    #[must_use]
-    fn parse_any(&self, tape: &mut Tape<'a, u8>) -> Result<Object, Error> {
-        let start = tape.pos;
-
-        // Trivial cases
-        if tape.cur().is_none() {
-            return Err(Error::MissingValue { pos: start });
-        }
-        if tape.is_at(b"true") {
-            tape.pos += "true".len();
-            return Ok(Object::Bool(true));
-        }
-        if tape.is_at(b"false") {
-            tape.pos += "false".len();
-            return Ok(Object::Bool(false));
-        }
-        if tape.is_at(b"null") {
-            tape.pos += "null".len();
-            return Ok(Object::Null);
-        }
-        if tape.is_at(b"inf") {
-            tape.pos += "inf".len();
-            return Ok(Object::Number(unsafe {
-                NotNan::new_unchecked(f64::INFINITY)
-            }));
-        }
-        if tape.is_at(b"infinity") {
-            tape.pos += "infinity".len();
-            return Ok(Object::Number(unsafe {
-                NotNan::new_unchecked(f64::INFINITY)
-            }));
-        }
-
-        // Everything else
-        let ch = tape.cur().unwrap();
-        match ch {
-            b'{' => self.parse_map(tape),
-            b'[' => self.parse_list(tape),
-            b'"' => self.parse_string(tape, b'"'),
-            b'\'' => self.parse_string(tape, b'\''),
-            b'-' | b'+' | b'0'..=b'9' => {
-                let pos = tape.pos;
-                let n = str::from_utf8(tape.consume(|ch, _| ch != b'\n'))?.parse::<f64>();
-                if n.is_err() {
-                    return Err(Error::InvalidNumber {
-                        pos,
-                        cause: n.unwrap_err().to_string(),
-                    });
-                }
-                NotNan::new(n.unwrap())
-                    .map_err(|_| Error::InvalidNumber {
-                        pos,
-                        cause: "Number is NaN".to_string(),
-                    })
-                    .map(|n| Object::Number(n))
-            }
-            b';' => {
-                // same comment style as markup
-                Err(Error::MissingValue { pos: start })
-            }
-            _ => Err(Error::IllegalCharacter { ch, pos: start }),
-        }
-    }
-
-    /// Parse a single- or multi-line quoted string.
-    ///
-    /// Advances `tape` past the closing delimiter.
-    /// Supports `\"` / `\'` escape sequences; a raw newline is legal inside
-    /// the string (multiline mode).  When a newline is found, the raw body is
-    /// fed through `process_multiline_string` to strip common indentation
-    /// and surrounding blank lines.
-    #[must_use]
-    fn parse_string(&self, tape: &mut Tape<'a, u8>, delim: u8) -> Result<Object, Error> {
-        let open_pos = tape.pos;
-        tape.adv(); // skip opening delimiter
-        let body_start = tape.pos;
-        let mut escaped = false;
-        loop {
-            match tape.cur() {
-                None => {
-                    return Err(Error::MissingCloser {
-                        open: delim,
-                        close: delim,
-                        open_pos,
-                    });
-                }
-                Some(b'\\') => {
-                    escaped = !escaped; // cancels escape on next byte
-                    tape.adv();
-                }
-                Some(ch) if ch == delim && !escaped => {
-                    // found the unescaped closing delimiter
-                    let raw = std::str::from_utf8(&tape[body_start..tape.pos])?;
-                    let value = if raw.contains('\n') {
-                        // multiline: strip common indent and surrounding blank lines
-                        Object::String(unindent(raw))
-                    } else {
-                        Object::String(raw.to_owned())
-                    };
-                    tape.adv(); // skip closing delimiter
-                    return Ok(value);
-                }
-                _ => {
-                    escaped = false;
-                    tape.adv();
-                }
-            }
-        }
-    }
-
-    #[must_use]
-    fn parse_map(&self, tape: &mut Tape<'a, u8>) -> Result<Object, Error> {
-        if tape.cur() != Some(b'{') {
-            // should not be checked beforehand
-            return Err(Error::IllegalCharacter {
-                ch: tape.cur().unwrap_or(0),
-                pos: tape.pos,
-            });
-        }
-        let open_pos = tape.pos;
-        tape.adv(); // skip '{'
-        tape.consume(|ch, _| ch.is_simple_ws());
-        let mut map = HashMap::new();
-        loop {
-            // Allow leading, trailing, and mixed/chained delimiters
-            tape.consume(|ch, _| ch.is_simple_ws() || ch == b'\n' || ch == b',');
-
-            // Get current character
-            if tape.cur().is_none() {
-                return Err(Error::MissingCloser {
-                    open: b'{',
-                    close: b'}',
-                    open_pos,
-                });
-            }
-            let ch = tape[tape.pos];
-            if ch == b'}' {
-                tape.adv();
-                break;
-            }
-
-            // Get key
-            let key = str::from_utf8(tape.consume_key())?;
-            if key.is_empty() {
-                return Err(Error::IllegalCharacter { ch, pos: tape.pos });
-            }
-
-            // Parse assignment
-            if key.chars().last() == Some('.') && tape.cur() == Some(b'{') {
-                tape.dec(); // align with '.'
-                unpack!(self.parse_map(tape)?, Object::Map(inner));
-                for (mut k, v) in inner {
-                    // flatten keys
-                    k.0.insert_str(0, key);
-                    map.insert(k, v);
-                }
-                continue;
-            }
-            tape.consume(|ch, _| ch.is_simple_ws());
-            if tape.cur() != Some(b':') {
-                return Err(Error::IllegalCharacter {
-                    ch: tape.cur().unwrap_or(0),
-                    pos: tape.pos,
-                });
-            }
-            tape.adv(); // skip ':'
-            tape.consume(|ch, _| ch.is_simple_ws());
-            map.insert(Key(key.to_owned()), self.parse_any(tape)?);
-        }
-        Ok(Object::Map(map))
-    }
-
-    #[must_use]
-    fn parse_list(&self, tape: &mut Tape<'a, u8>) -> Result<Object, Error> {
-        let mut items = vec![];
-        loop {
-            tape.consume(|ch, _| ch.is_simple_ws() || ch == b'\n');
-            if tape.cur() == Some(b']') {
-                tape.adv();
-                break;
-            }
-            if tape.cur().is_none() {
-                return Err(Error::MissingCloser {
-                    open: b'[',
-                    close: b']',
-                    open_pos: tape.pos,
-                });
-            }
-            items.push(self.parse_any(tape)?);
-            tape.consume(|ch, _| ch.is_simple_ws() || ch == b'\n');
-            if tape.cur() == Some(b',') {
-                tape.adv();
-            } else if tape.cur() != Some(b']') {
-                return Err(Error::IllegalCharacter {
-                    ch: tape.cur().unwrap_or(0),
-                    pos: tape.pos,
-                });
-            }
-        }
-        Ok(Object::List(items))
     }
 }

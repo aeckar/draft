@@ -5,7 +5,7 @@ use std::{
 
 use regex::Regex;
 
-use crate::object::Number;
+use crate::Number;
 
 #[derive(Debug, Clone)]
 pub struct KeySpec {
