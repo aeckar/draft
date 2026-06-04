@@ -1,5 +1,10 @@
 [workspace]
 members = [
+    # todo -- spinoff to own repo when finished
+    "crates/dcon",
+    "crates/dcon-core",
+    "crates/dcon-macros",
+
     "crates/draft-core",
     "crates/draft-cli",
     "crates/draft-editor",

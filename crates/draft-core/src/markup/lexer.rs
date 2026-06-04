@@ -121,13 +121,23 @@ impl<'a> MarkupSyntax<'a> {
                 b']' => scan.handle_cbrac(tape),
                 b'=' => scan.handle_equals(tape),
                 b'"' | b'\'' => scan.handle_quote(tape, tape[tape.pos]),
-                b'\\' => scan.handle_bslash(tape),
-                b';' => {
-                    // divider comment ';;' handled by editor
+                b';' => scan.handle_semi(tape),
+                b'\\' => {
+                    // escape character
+                    let mut tape = tape;
+                    if tape.pos == tape.len() - 1 {
+                        None
+                    } else {
+                        tape.pos += 2;
+                        Some(tape)
+                    }     
+                },
+                b'#' => {
+                    // line comment
                     tape.seek_ch(b'\n');
                     Some(tape)
                 }
-                _ => None, // includes spaces, tabs
+                _ => None, // includes simple whitespace
             };
             if let Some(jump) = jump {
                 tape = jump;
@@ -721,19 +731,28 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    /// Resolves whether a `\` character
-    /// belongs to an escape character, a macro, or plain text.
+    /// Resolves whether a `\` character belongs to an escape character or plain text.
     #[must_use]
     fn handle_bslash(&mut self, mut tape: Tape<'a, u8>) -> Option<Tape<'a, u8>> {
         if tape.pos == tape.len() - 1 {
             return None;
         }
+        tape.pos += 2;  // skip over `\` and character
+        return Some(tape);
+    }
+
+    /// Resolves whether a `;` character belongs to a macro or plain text.
+    #[must_use]
+    fn handle_semi(&mut self, mut tape: Tape<'a, u8>) -> Option<Tape<'a, u8>> {
+        if tape.pos == tape.len() - 1 {
+            return None;
+        }
         let start = tape.pos; // keep for macro handle token
-        tape.adv(); // skip past '\'
+        tape.adv(); // skip past ';'
         let name = tape.consume_key();
         if name.len() == 0 {
-            // treat as escape
-            return Some(tape); // stop at the character after '\'
+            // treat as semicolon
+            return None;
         }
         let mut next_pos = tape.pos;
         let mut cur = tape.cur();

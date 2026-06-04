@@ -1,0 +1,32 @@
+[package]
+name = "dcon-core"
+version = "0.1.0"
+edition = "2024"
+authors = ["Angel Eckardt <eckardt.angel7@outlook.com>"]
+license = "AGPL-3.0-only"                                # disallow competitors until launch
+homepage = "https://github.com/aeckar/draft"
+repository = "https://github.com/aeckar/draft"
+
+[dependencies]
+thiserror = "2.0.18"
+derive_more = { version = "2.1.1", features = ["from", "deref", "display"] }
+typeof-literal = "1.0.0"
+strum = { version = "0.28.0", optional = true, features = ["derive"] }
+
+# for key verification
+regex = "1.12.3"
+
+# expose serialization API
+serde = { version = "1.0.228", optional = true, features = ["derive"] }
+
+# JSON support
+serde_json = { version = "1.0.149", optional = true }
+
+# trim multiline strings in object notation
+unindent = { version = "0.2.4", optional = true }
+
+# provides `NotNan`, which provides `Eq`, `Ord` and `Hash` for number encoding
+ordered-float = "5.3.0"
+
+[lib]
+path = "src/lib.rs"

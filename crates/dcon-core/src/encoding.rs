@@ -1,11 +1,61 @@
 use std::{collections::HashMap, fmt::Display, str::Utf8Error};
 
-use ordered_float::NotNan;
-use taped::{CharExt, Tape};
+use ordered_float::{FloatIsNan, NotNan};
+use serde::{Deserialize, Serialize};
+use strum::EnumDiscriminants;
+use taped::{CharExt, Tape, ToTape};
 use thiserror::Error;
 use unindent::unindent;
 
 use crate::{prelude::*, unpack};
+
+/// A not-NaN floating-point representation used for storing numbers in object notation.
+pub type Number = NotNan<f64>;
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    derive_more::Deref,
+    derive_more::Display,
+)]
+#[serde(transparent)]
+pub struct Key(pub(crate) String);
+
+impl TryFrom<String> for Key {
+    type Error = InvalidKey;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let mut tape = value.as_bytes().to_tape();
+        tape.consume_key();
+        if !tape.is_exhausted() {
+            let pos = tape.pos; // satisfy borrow checker
+            return Err(InvalidKey { id: value, pos });
+        }
+        Ok(Self(value))
+    }
+}
+
+impl TryFrom<&str> for Key {
+    type Error = InvalidKey;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::try_from(value.to_owned())
+    }
+}
+
+#[derive(Debug, Error)]
+#[error("Illegal character at index {pos} for key '{id}'")]
+pub struct InvalidKey {
+    id: String,
+    pos: usize,
+}
 
 /// An instance of a data object.
 ///
@@ -29,14 +79,65 @@ use crate::{prelude::*, unpack};
 /// Canonical representation of data objects is determined first by readability,
 /// then by conciseness, and finally by orthogonality. For example, list items
 /// are presented on their own line, which makes them most easily recognized.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// No strict size limits are enforced for strings, lists, and maps.
+/// This is done to maintain simplicity, and is unlikely to be an issue in real-world examples
+/// as configurations are terse by design.
+#[derive(Debug, Clone, PartialEq, Eq, EnumDiscriminants, derive_more::From)]
+#[strum_discriminants(name(ObjectKind))]
 pub enum Object {
     Null,
     Bool(bool),
-    Number(NotNan<f64>),
+    Number(Number),
     String(String),
     List(Vec<Object>),
-    Map { map: HashMap<String, Object> },
+    Map(HashMap<Key, Object>),
+}
+
+/// Not intended for 64-bit or 128-bit integers,
+/// since they do not support lossless conversion to `f64`.
+/// 
+/// To convert these into [Object][`crate::object::Object`],
+/// users must convert to `f64` first (possibly lossy).
+macro_rules! impl_from_exact_int {
+    ($($t:ty),+) => {
+        $(
+            impl From<$t> for Object {
+                fn from(value: $t) -> Self {
+                    // Safe: integer types are never NaN
+                    Self::Number(unsafe { NotNan::new_unchecked(value as f64) })
+                }
+            }
+        )+
+    };
+}
+
+impl_from_exact_int!(u8, u16, u32, i8, i16, i32);
+
+impl TryFrom<f64> for Object {
+    type Error = FloatIsNan;
+
+    fn try_from(value: f64) -> Result<Self, Self::Error> {
+        Ok(Self::Number(NotNan::new(value)?))
+    }
+}
+
+impl From<&str> for Object {
+    fn from(value: &str) -> Self {
+        Self::String(value.to_owned())
+    }
+}
+
+impl TryFrom<HashMap<String, Object>> for Object {
+    type Error = InvalidKey;
+
+    fn try_from(value: HashMap<String, Object>) -> Result<Self, Self::Error> {
+        let props = value
+            .into_iter()
+            .map(|(k, v)| Ok((k.try_into()?, v)))
+            .collect::<Result<_, _>>()?;
+        Ok(Self::Map(props))
+    }
 }
 
 impl Display for Object {
@@ -47,24 +148,24 @@ impl Display for Object {
             Self::Number(n) => write!(f, "{n}"),
             Self::String(str) => write!(f, "\"{str}\""),
             Self::List(items) => {
-                write!(f, "{{")?;
+                write!(f, "[")?;
                 for (idx, item) in items.iter().enumerate() {
                     write!(f, "{item}")?;
                     if idx != items.len() - 1 {
                         write!(f, ",")?;
                     }
                 }
-                write!(f, "}}")
+                write!(f, "]")
             }
-            Self::Map { map } => {
-                write!(f, ".{{")?;
+            Self::Map(props) => {
+                write!(f, "{{")?;
 
                 // Sort keys for deterministic output
-                let mut keys: Vec<&String> = map.keys().collect();
+                let mut keys: Vec<&Key> = props.keys().collect();
                 keys.sort_unstable();
 
                 for (idx, key) in keys.iter().enumerate() {
-                    let val = &map[*key];
+                    let val = &props[*key];
                     write!(f, "{key}={val}")?;
                     if idx != keys.len() - 1 {
                         write!(f, ",")?;
@@ -94,30 +195,30 @@ impl Object {
             Self::String(s) => write!(f, "\"{s}\""),
             Self::List(items) => {
                 if items.is_empty() {
-                    return write!(f, "{{}}");
+                    return write!(f, "[]");
                 }
-                writeln!(f, "{{")?;
+                writeln!(f, "[")?;
                 for item in items {
                     write!(f, "{next_indent}")?;
                     item.pfmt(f, depth + 1)?;
                     writeln!(f, ",")?; // use trailing comma
                 }
-                write!(f, "}}")
+                write!(f, "]")
             }
-            Self::Map { map } => {
-                if map.is_empty() {
-                    return write!(f, ".{{}}");
+            Self::Map(props) => {
+                if props.is_empty() {
+                    return write!(f, "{{}}");
                 }
-                if map.len() == 1 {
-                    let (key, val) = map.iter().next().unwrap();
-                    write!(f, ".{{\n{next_indent}{key} = ")?;
+                if props.len() == 1 {
+                    let (key, val) = props.iter().next().unwrap();
+                    write!(f, "{{\n{next_indent}{key} = ")?;
                     val.pfmt(f, depth + 1)?;
                     return write!(f, ",\n{indent}}}"); // use trailing comma
                 }
-                writeln!(f, ".{{")?;
+                writeln!(f, "{{")?;
 
                 // Sort keys for deterministic output
-                let mut sorted_keys: Vec<&String> = map.keys().collect();
+                let mut sorted_keys: Vec<&Key> = props.keys().collect();
                 sorted_keys.sort_unstable();
 
                 let mut i = 0;
@@ -127,7 +228,7 @@ impl Object {
 
                     // Unscoped keys
                     if key_parts.is_none() {
-                        let val = &map[key];
+                        let val = &props[key];
                         write!(f, "{next_indent}{key} = ")?;
                         val.pfmt(f, depth + 1)?;
                         writeln!(f, ",")?;
@@ -147,13 +248,13 @@ impl Object {
 
                     // If at least two keys share this prefix, group them as key scope
                     if scope_end - i > 1 {
-                        write!(f, "{next_indent}{prefix}.{{\n")?;
+                        write!(f, "{next_indent}{prefix}{{\n")?;
 
                         // Collect stripped keys as keys in scope
                         let mut key_scope = HashMap::new();
                         for k in &sorted_keys[i..scope_end] {
                             let stripped_key = k.strip_prefix(&dot_prefix).unwrap().to_string();
-                            key_scope.insert(stripped_key, map[*k].clone());
+                            key_scope.insert(stripped_key, props[*k].clone());
                         }
 
                         // Format key-value pairs with stripped keys
@@ -272,8 +373,8 @@ impl<'a> ObjectSyntax<'a> {
         // Everything else
         let ch = tape.cur().unwrap();
         match ch {
-            b'.' => self.parse_map(tape),
-            b'{' => self.parse_list(tape),
+            b'{' => self.parse_map(tape),
+            b'[' => self.parse_list(tape),
             b'"' => self.parse_string(tape, b'"'),
             b'\'' => self.parse_string(tape, b'\''),
             b'-' | b'+' | b'0'..=b'9' => {
@@ -348,7 +449,6 @@ impl<'a> ObjectSyntax<'a> {
 
     #[must_use]
     fn parse_map(&self, tape: &mut Tape<'a, u8>) -> Result<Object, Error> {
-        tape.adv(); // skip '.'
         if tape.cur() != Some(b'{') {
             // should not be checked beforehand
             return Err(Error::IllegalCharacter {
@@ -387,26 +487,26 @@ impl<'a> ObjectSyntax<'a> {
             // Parse assignment
             if key.chars().last() == Some('.') && tape.cur() == Some(b'{') {
                 tape.dec(); // align with '.'
-                unpack!(self.parse_map(tape)?, Object::Map { map: inner });
+                unpack!(self.parse_map(tape)?, Object::Map(inner));
                 for (mut k, v) in inner {
                     // flatten keys
-                    k.insert_str(0, key);
+                    k.0.insert_str(0, key);
                     map.insert(k, v);
                 }
                 continue;
             }
             tape.consume(|ch, _| ch.is_simple_ws());
-            if tape.cur() != Some(b'=') {
+            if tape.cur() != Some(b':') {
                 return Err(Error::IllegalCharacter {
                     ch: tape.cur().unwrap_or(0),
                     pos: tape.pos,
                 });
             }
-            tape.adv(); // skip '='
+            tape.adv(); // skip ':'
             tape.consume(|ch, _| ch.is_simple_ws());
-            map.insert(key.to_string(), self.parse_any(tape)?);
+            map.insert(Key(key.to_owned()), self.parse_any(tape)?);
         }
-        Ok(Object::Map { map })
+        Ok(Object::Map(map))
     }
 
     #[must_use]
@@ -414,14 +514,14 @@ impl<'a> ObjectSyntax<'a> {
         let mut items = vec![];
         loop {
             tape.consume(|ch, _| ch.is_simple_ws() || ch == b'\n');
-            if tape.cur() == Some(b'}') {
+            if tape.cur() == Some(b']') {
                 tape.adv();
                 break;
             }
             if tape.cur().is_none() {
                 return Err(Error::MissingCloser {
-                    open: b'{',
-                    close: b'}',
+                    open: b'[',
+                    close: b']',
                     open_pos: tape.pos,
                 });
             }
@@ -429,7 +529,7 @@ impl<'a> ObjectSyntax<'a> {
             tape.consume(|ch, _| ch.is_simple_ws() || ch == b'\n');
             if tape.cur() == Some(b',') {
                 tape.adv();
-            } else if tape.cur() != Some(b'}') {
+            } else if tape.cur() != Some(b']') {
                 return Err(Error::IllegalCharacter {
                     ch: tape.cur().unwrap_or(0),
                     pos: tape.pos,

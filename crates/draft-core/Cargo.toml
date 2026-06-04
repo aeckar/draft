@@ -9,14 +9,16 @@ repository = "https://github.com/aeckar/draft"
 
 [dependencies]
 thiserror = "2.0.18"
-pastey = "0.2.1"
+pastey = "0.2.3"
 indoc = "2.0.7"
-bitflags = "2.11.1"
+bitflags = "2.12.1"
+derive_more = { version = "2.1.1", features = ["from", "deref", "display"] }
+typeof-literal = "1.0.0"
 
 ## Lexical analysis & AST construction
 
 # zero-copy, non-linear parsing over slices of bytes and tokens
-taped = "1.3.2"
+taped = "1.5.2"
 
 ## Lexical analysis
 
@@ -44,20 +46,6 @@ pulldown-cmark = { version = "0.13.4", optional = true }
 
 # table conversions from CSV via `table` macro
 csv = { version = "1.4.0", optional = true }
-
-## Object notation
-
-# expose serialization API
-serde = { version = "1.0.228", optional = true, features = ["derive"] }
-
-# JSON support
-serde_json = { version = "1.0.149", optional = true }
-
-# trim multiline strings in object notation
-unindent = { version = "0.2.4", optional = true }
-
-# provides `NotNan`, which provides `Eq`, `Ord` and `Hash` for number encoding
-ordered-float = "5.3.0"
 
 [features]
 default = ["full"] # todo change to "parse-markup" after implementation 

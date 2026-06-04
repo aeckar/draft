@@ -1,4 +1,4 @@
 # Workaround for syntax highlighting on GitHub until til support is merged to Linguist repository
-*.mgd linguist-language=Markdown
-*.mgon linguist-language=JSON
+*.dt   linguist-language=Markdown
+*.dcon linguist-language=JSON
 /samples

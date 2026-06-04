@@ -19,7 +19,7 @@ impl Serialize for Object {
             Self::Number(n) => serializer.serialize_f64(n.into_inner()),
             Self::String(s) => serializer.serialize_str(s),
             Self::List(items) => items.serialize(serializer),
-            Self::Map { map } => map.serialize(serializer),
+            Self::Map(map) => map.serialize(serializer),
         }
     }
 }
@@ -107,11 +107,11 @@ impl<'de> Deserialize<'de> for Object {
             where
                 A: MapAccess<'de>,
             {
-                let mut hashmap = HashMap::with_capacity(map.size_hint().unwrap_or(0));
+                let mut hash_map = HashMap::with_capacity(map.size_hint().unwrap_or(0));
                 while let Some((key, value)) = map.next_entry()? {
-                    hashmap.insert(key, value);
+                    hash_map.insert(key, value);
                 }
-                Ok(Object::Map { map: hashmap })
+                Ok(Object::Map(hash_map))
             }
         }
 
