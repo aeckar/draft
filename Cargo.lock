@@ -386,11 +386,9 @@ dependencies = [
  "ordered-float",
  "regex",
  "serde",
- "serde_json",
  "strum",
  "taped",
  "thiserror",
- "typeof-literal",
  "unindent",
 ]
 

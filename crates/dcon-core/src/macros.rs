@@ -45,7 +45,7 @@ use crate::Object;
 
 pub static ANY_STRING: LazyLock<Regex> = LazyLock::new(|| Regex::new(".*").unwrap());
 
-/// Used to convert Rust literals to [Object][`crate::object::Object`] in builder macros.
+/// Used to convert Rust literals to [Object][`crate::Object`] in builder macros.
 /// 
 /// Unlike normal conversions, these panic on 
 pub(crate) trait Literal {
@@ -54,25 +54,14 @@ pub(crate) trait Literal {
 
 impl Literal for f64 {
     fn into_obj(self) -> Object {
-        Object::Number(NotNan::new(self).expect("Number must not be NaN"))
+        // safe, since NaN can never be a literal
+        Object::Number(unsafe { NotNan::new_unchecked(self) })
     }
 }
 
 impl Literal for &str {
     fn into_obj(self) -> Object {
         Object::String(self.to_owned())
-    }
-}
-
-impl Literal for u64 {
-    fn into_obj(self) -> Object {
-
-    }
-}
-
-impl Literal for i64 {
-    fn into_obj(self) -> Object {
-        
     }
 }
 
@@ -103,20 +92,20 @@ impl_literal_exact_int!(u8, u16, u32, i8, i16, i32);
 /// let c = ty!({ name = str, age = number });
 /// ```
 #[macro_export]
-macro_rules! ty {//todo rename
+macro_rules! ty {
     // Atomic types
-    (any $(,)?) => { $crate::object::ObjectSpec::Any };
-    (null $(,)?) => { $crate::object::ObjectSpec::Null };
-    (bool $(,)?) => { $crate::object::ObjectSpec::Bool };
-    (true $(,)?) => { $crate::object::ObjectSpec::True };
-    (false $(,)?) => { $crate::object::ObjectSpec::False };
-    (number $(,)?) => { $crate::object::ObjectSpec::Number };
-    (string $(,)?) => { $crate::object::ObjectSpec::String };
+    (any $(,)?) => { $crate::ObjectSpec::Any };
+    (null $(,)?) => { $crate::ObjectSpec::Null };
+    (bool $(,)?) => { $crate::ObjectSpec::Bool };
+    (true $(,)?) => { $crate::ObjectSpec::True };
+    (false $(,)?) => { $crate::ObjectSpec::False };
+    (number $(,)?) => { $crate::ObjectSpec::Number };
+    (string $(,)?) => { $crate::ObjectSpec::String };
 
     // Range
     // lo => hi
     ($lo:expr => $hi:expr $(,)?) => {
-        $crate::object::ObjectSpec::Range {
+        $crate::ObjectSpec::Range {
             start: ::ordered_float::NotNan::new($lo as f64).unwrap(),
             end: ::ordered_float::NotNan::new($hi as f64).unwrap(),
         }
@@ -125,29 +114,29 @@ macro_rules! ty {//todo rename
     // Exact string
     // Must use double quotes due to Rust convention
     ($expect:literal $(,)?) => {
-        $crate::object::ObjectSpec::ExactString($expect)
+        $crate::ObjectSpec::ExactString($expect)
     };
 
     // Pattern
     // r"pat"
     // Must use double quotes due to Rust convention
     (r$pat:literal $(,)?) => {
-        $crate::object::ObjectSpec::Pattern(::regex::Regex::new($pat).expect(concat!("Invalid regex: ", $pat)))
+        $crate::ObjectSpec::Pattern(::regex::Regex::new($pat).expect(concat!("Invalid regex: ", $pat)))
     };
 
     // List
     ($ty:tt[] $(,)?) => {
-        $crate::object::ObjectSpec::List { ty: Box::new(ty!($ty)) }
+        $crate::ObjectSpec::List { ty: Box::new(ty!($ty)) }
     };
 
     // Sized list
     ([$ty:tt; $n:expr] $(,)?) => {
-        $crate::object::ObjectSpec::SizedList { ty: Box::new(ty!($ty)), length: $n as usize }
+        $crate::ObjectSpec::SizedList { ty: Box::new(ty!($ty)), length: $n as usize }
     };
 
     // Tuple
     ([$($slot:tt),* $(,)?] $(,)?) => {
-        $crate::object::ObjectSpec::Tuple {
+        $crate::ObjectSpec::Tuple {
             slots: vec![ $( ty!($slot) ),+ ],
         }
     };
@@ -155,7 +144,7 @@ macro_rules! ty {//todo rename
     // Map with key-value constraints
     ({ $($key:literal $( ? $opt:tt )? : $ty:tt $(| $rest:tt)* ),* $(,)? } $(,)?) => {
         {
-            let mut map = $crate::object::Object::MapProps::new();
+            let mut map = $crate::Object::MapProps::new();
             $(
                 let pattern = if $key == "_" {  // validated after match
                     ANY_STRING
@@ -167,7 +156,7 @@ macro_rules! ty {//todo rename
                     pattern
                 }, Box::new(ty!($ty $(| $rest)*)));
             )*
-            $crate::object::ObjectSpec::Map(map)
+            $crate::ObjectSpec::Map(map)
         }
     };
 
@@ -178,24 +167,24 @@ macro_rules! ty {//todo rename
         let lhs = ty!($head);
         let rhs = ty!($($tail)|+);
         match (lhs, rhs) {
-            ($crate::object::ObjectSpec::Union(mut a), $crate::object::ObjectSpec::Union(b)) => {
+            ($crate::ObjectSpec::Union(mut a), $crate::ObjectSpec::Union(b)) => {
                 a.extend(b);
-                $crate::object::ObjectSpec::Union(a)
+                $crate::ObjectSpec::Union(a)
             }
-            ($crate::object::ObjectSpec::Union(mut a), rhs) => {
+            ($crate::ObjectSpec::Union(mut a), rhs) => {
                 a.push(rhs);
-                $crate::object::ObjectSpec::Union(a)
+                $crate::ObjectSpec::Union(a)
             }
-            (lhs, $crate::object::ObjectSpec::Union(mut b)) => {
+            (lhs, $crate::ObjectSpec::Union(mut b)) => {
                 b.insert(0, lhs);
-                $crate::object::ObjectSpec::Union(b)
+                $crate::ObjectSpec::Union(b)
             }
-            (lhs, rhs) => $crate::object::ObjectSpec::Union(vec![lhs, rhs]),
+            (lhs, rhs) => $crate::ObjectSpec::Union(vec![lhs, rhs]),
         }
     }};
 }
 
-/// Constructs an [ObjectSpec::Map][`crate::object::ObjectSpec::Map`] (a schema definition).
+/// Constructs an [ObjectSpec::Map][`crate::ObjectSpec::Map`] (a schema definition).
 ///
 /// # Examples
 ///
@@ -216,7 +205,7 @@ macro_rules! schema {
     };
 }
 
-/// Construct an [Object][`crate::object::Object`] from literal notation.
+/// Construct an [Object][`crate::Object`] from literal notation.
 ///
 /// # Examples
 ///
@@ -232,51 +221,26 @@ macro_rules! schema {
 #[macro_export]
 macro_rules! __obj {
     // Symbolic constants
-    (null) => { $crate::object::Object::Null };
-    (true) => { $crate::object::Object::Bool(true) };
-    (false) => { $crate::object::Object::Bool(false) };
+    (null $(,)?) => { $crate::Object::Null };
+    (true $(,)?) => { $crate::Object::Bool(true) };
+    (false $(,)?) => { $crate::Object::Bool(false) };
 
     // Number | String
-    ($lit:literal) => {
+    ($lit:literal $(,)?) => {
         {
-            use $crate::object::Literal;
-
+            use $crate::Literal;
             $lit.into_obj()
-        }
-    };
-
-    (@float $lit:literal) => {
-        $crate::object::Object::try_from($lit)
-            .expect(concat!("Number must not be NaN: ", stringify!($lit)))
-    };
-
-    (@wide_int $lit:literal) => {
-        {
-            // Maximum/minimum exact integers for `f64`
-            const MAX_EXACT: i64 = 9_007_199_254_740_991;
-            const MIN_EXACT: i64 = -9_007_199_254_740_991;
-
-            if $lit >= MIN_EXACT && $lit <= MAX_EXACT {
-                $crate::object::Object::from(
-                    unsafe { ::ordered_float::NotNan::new_unchecked($lit as f64) }
-                )
-            } else {
-                Err("Value is too large/small to be represented losslessly in f64: ")
-            }
-            $crate::object::Object::try_from($lit)
-                .expect(concat!("Number must not be NaN: ", stringify!($lit)))
         }
     };
 
     // List
     ([ $($item:tt),* $(,)? ]) => {
-        $crate::object::Object::List(vec![ $( __obj!($item) ),* ])
+        $crate::Object::List(vec![ $( __obj!($item) ),* ])
     };
 
     // Map
     ({ $($($key:tt).* : $val:tt),* $(,)? }) => {
         {
-
             let mut props = ::std::collections::HashMap::new();
             $(
                 props.insert(
@@ -286,12 +250,12 @@ macro_rules! __obj {
                     __obj!($val)
                 );
             )*
-            $crate::object::Object::Map(props)
+            $crate::Object::Map(props)
         }
     };
 }
 
-/// Constructs a basic [Object][`crate::object::Object`] from literal notation.
+/// Constructs a basic [Object][`crate::Object`] from literal notation.
 ///
 /// For lists and maps, use [list][`crate::list`] and [map][`crate::map`], respectively.
 ///
@@ -321,7 +285,7 @@ macro_rules! obj {
     };
 }
 
-/// Constructs an [`Object::List`][`crate::object::Object::List`].
+/// Constructs an [`Object::List`][`crate::Object::List`].
 ///
 /// # Examples
 ///
@@ -335,7 +299,7 @@ macro_rules! list {
     ($($item:tt),* $(,)?) => { __obj!([ $($item),* ]) };
 }
 
-/// Constructs an [`Object::Map`][`crate::object::Object::Map`].
+/// Constructs an [`Object::Map`][`crate::Object::Map`].
 ///
 /// Unlike in object notation, commas must be used between **every** property.
 ///
@@ -356,10 +320,15 @@ macro_rules! map {
 fn n() {
     let _ = obj!(null);
     let _ = obj!(true);
+    let _ = obj!(42.0);
     let _ = obj!("hello");
     let _ = list![];
     let mymap = map! {
-        null: 3,
+        null= 3,
+        null.{
+            n:2,
+            n:1
+        }
         b: null,
     };
     let _ = obj!(4.20);

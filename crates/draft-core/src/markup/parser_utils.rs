@@ -8,8 +8,12 @@ use crate::markup::{
 };
 
 pub type TokenStream<'a> = Tape<'a, TokenSpan<'a>>;
-pub type Result<'a> = Option<(AstNode<'a>, TokenStream<'a>)>;
 pub type Handler<'a> = fn(TokenStream<'a>) -> Option<(AstNode<'a>, TokenStream<'a>)>;
+
+pub struct AstOutput<'a> {
+    completed: AstNode<'a>,
+    rest: TokenStream<'a>,
+}
 
 /// A token or parser rule that can be matched to some slice of the
 /// list of tokens produced after lexing.

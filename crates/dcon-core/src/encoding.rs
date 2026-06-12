@@ -374,6 +374,9 @@ impl Object {
                 continue;
             }
             tape.consume(|ch, _| ch.is_simple_ws());
+            if tape.cur() == Some(b'=') {
+                
+            }
             if tape.cur() != Some(b':') {
                 return Err(Error::IllegalCharacter {
                     ch: tape.cur().unwrap_or(0),
