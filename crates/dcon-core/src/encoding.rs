@@ -196,14 +196,14 @@ impl Display for Object {
 
                 for (idx, key) in keys.iter().enumerate() {
                     let val = &props[*key];
-                    write!(f, "{key}={val}")?;
+                    write!(f, "{key}:{val}")?;
                     if idx != keys.len() - 1 {
                         write!(f, ",")?;
                     }
                 }
                 write!(f, "}}")
             }
-        };
+        }?;
         Ok(())
     }
 }
@@ -213,7 +213,6 @@ impl Object {
         Self::parse_any(&mut notation.as_bytes().to_tape())
     }
 
-    #[must_use]
     fn parse_any(tape: &mut Tape<'_, u8>) -> Result<Object, Error> {
         let start = tape.pos;
 
@@ -256,10 +255,10 @@ impl Object {
             b'-' | b'+' | b'0'..=b'9' => {
                 let pos = tape.pos;
                 let n = str::from_utf8(tape.consume(|ch, _| ch != b'\n'))?.parse::<f64>();
-                if n.is_err() {
+                if let Err(e) = n {
                     return Err(Error::InvalidNumber {
                         pos,
-                        cause: n.unwrap_err().to_string(),
+                        cause: e.to_string(),
                     });
                 }
                 NotNan::new(n.unwrap())
@@ -267,7 +266,7 @@ impl Object {
                         pos,
                         cause: "Number is NaN".to_string(),
                     })
-                    .map(|n| Object::Number(n))
+                    .map(Object::Number)
             }
             b';' => {
                 // same comment style as markup
@@ -284,7 +283,6 @@ impl Object {
     /// the string (multiline mode).  When a newline is found, the raw body is
     /// fed through `process_multiline_string` to strip common indentation
     /// and surrounding blank lines.
-    #[must_use]
     fn parse_string(tape: &mut Tape<'_, u8>, delim: u8) -> Result<Object, Error> {
         let open_pos = tape.pos;
         tape.adv(); // skip opening delimiter
@@ -323,7 +321,6 @@ impl Object {
         }
     }
 
-    #[must_use]
     fn parse_map(tape: &mut Tape<'_, u8>) -> Result<Object, Error> {
         if tape.cur() != Some(b'{') {
             // should not be checked beforehand
@@ -361,7 +358,7 @@ impl Object {
             }
 
             // Parse assignment
-            if key.chars().last() == Some('.') && tape.cur() == Some(b'{') {
+            if key.ends_with('.') && tape.cur() == Some(b'{') {
                 tape.dec(); // align with '.'
                 let Object::Map(inner) = Self::parse_map(tape)? else {
                     unreachable!()
@@ -374,9 +371,6 @@ impl Object {
                 continue;
             }
             tape.consume(|ch, _| ch.is_simple_ws());
-            if tape.cur() == Some(b'=') {
-                
-            }
             if tape.cur() != Some(b':') {
                 return Err(Error::IllegalCharacter {
                     ch: tape.cur().unwrap_or(0),
@@ -390,7 +384,6 @@ impl Object {
         Ok(Object::Map(map))
     }
 
-    #[must_use]
     fn parse_list(tape: &mut Tape<'_, u8>) -> Result<Object, Error> {
         let mut items = vec![];
         loop {
@@ -470,7 +463,7 @@ impl Object {
                     // Unscoped keys
                     if key_parts.is_none() {
                         let val = &props[key];
-                        write!(f, "{next_indent}{key} = ")?;
+                        write!(f, "{next_indent}{key}: ")?;
                         val.pfmt(f, depth + 1)?;
                         writeln!(f, ",")?;
                         i += 1;
@@ -489,7 +482,7 @@ impl Object {
 
                     // If at least two keys share this prefix, group them as key scope
                     if scope_end - i > 1 {
-                        write!(f, "{next_indent}{prefix}{{\n")?;
+                        writeln!(f, "{next_indent}{prefix}{{")?;
 
                         // Collect stripped keys as keys in scope
                         let mut key_scope = HashMap::new();

@@ -1,3 +1,13 @@
+//! Declarative macros used to construct object instances idiomatically.
+//!
+//! Rewritten using Claude.
+//!
+//! # Implementation
+//!
+//! Since macros expand in the caller's crate, unqualified `std` might not resolve if using
+//! `#![no_std]`` or have a conflicting name in scope. `::std` anchors to the crate root,
+//! making the path unambiguous regardless of where the macro is used.
+
 // ============================================================
 //  ty!  —  construct a Constraint from type notation
 //  schema!  —  construct a Map Constraint (schema definition)
@@ -32,10 +42,6 @@
 //    { key = expr, … }      → Object::Map { map }  ← NEW: {} for maps
 // ============================================================
 
-/*
-Because macros expand in the caller's crate, so unqualified std might not resolve if they're using #![no_std] or have a conflicting name in scope. ::std anchors to the crate root, making the path unambiguous regardless of where the macro is used.
- */
-
 use std::sync::LazyLock;
 
 use ordered_float::NotNan;
@@ -46,9 +52,9 @@ use crate::Object;
 pub static ANY_STRING: LazyLock<Regex> = LazyLock::new(|| Regex::new(".*").unwrap());
 
 /// Used to convert Rust literals to [Object][`crate::Object`] in builder macros.
-/// 
-/// Unlike normal conversions, these panic on 
-pub(crate) trait Literal {
+///
+/// Unlike normal conversions, these panic on failure.
+pub trait Literal {
     fn into_obj(self) -> Object;
 }
 
@@ -205,6 +211,28 @@ macro_rules! schema {
     };
 }
 
+/// Turns a dot-joined key path (`a`, `a.b.c`, …) *or* a single string-literal
+/// key (`"weird key"`, `"$dollar"`, …) into the `String` used for map
+/// insertion.
+///
+/// A bare string literal is unquoted and used verbatim — this is the escape
+/// hatch for keys containing characters (spaces, `$`, …) that aren't valid
+/// in a dotted identifier chain. Without this, `stringify!("$dollar")`
+/// would produce the *token text* `"\"$dollar\""`, quote marks included,
+/// instead of the string's actual value.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __keypath {
+    // A single string literal: use its value, not its token text.
+    ($key:literal) => {
+        $key.to_string()
+    };
+    // One or more dot-joined segments (idents, numbers, etc).
+    ($($key:tt).+) => {
+        stringify!($($key).+).to_string()
+    };
+}
+
 /// Construct an [Object][`crate::Object`] from literal notation.
 ///
 /// # Examples
@@ -214,7 +242,13 @@ macro_rules! schema {
 /// let o = __obj!(true);
 /// let o = __obj!(42.0);
 /// let o = __obj!("hello");
-/// let o = __obj!(["a", "b", "c"]);         // [] = list
+/// let o = __obj!(-1.0);                     // unary minus, top-level
+/// let o = __obj!((2.0 * radius));           // (expr) = escape hatch for
+///                                           // anything a bare literal
+///                                           // can't express, e.g. a
+///                                           // negative number nested
+///                                           // inside a map!/list!
+/// let o = __obj!(["a", "b", "c"]);          // [] = list
 /// let o = __obj!({ "x" = 1.0, "y" = 2.0 }); // {} = map
 /// ```
 #[doc(hidden)]
@@ -224,6 +258,28 @@ macro_rules! __obj {
     (null $(,)?) => { $crate::Object::Null };
     (true $(,)?) => { $crate::Object::Bool(true) };
     (false $(,)?) => { $crate::Object::Bool(false) };
+
+    // Escape hatch: any parenthesized expression. Since map!/list! entries
+    // capture each value as a single token tree, a parenthesized group is
+    // the way to smuggle in anything more than a bare literal — negative
+    // numbers, arithmetic, a variable, a function call, etc.
+    (($e:expr) $(,)?) => {
+        {
+            use $crate::Literal;
+            ($e).into_obj()
+        }
+    };
+
+    // Sugar for the common case of a *top-level* negative literal, e.g.
+    // `obj!(-1.0)`. Inside a map!/list! entry, use the parens form above
+    // instead (`key: (-1.0)`), since `-1.0` is two tokens and won't match
+    // the single-`tt` value slot those macros use.
+    (- $lit:literal $(,)?) => {
+        {
+            use $crate::Literal;
+            (-$lit).into_obj()
+        }
+    };
 
     // Number | String
     ($lit:literal $(,)?) => {
@@ -243,10 +299,10 @@ macro_rules! __obj {
         {
             let mut props = ::std::collections::HashMap::new();
             $(
+                let __key: ::std::string::String = __keypath!($($key).*);
                 props.insert(
-                    stringify!($($key).*)
-                        .try_into()
-                        .expect(concat!("Invalid key: ", stringify!($($key).*))),
+                    __key.as_str().try_into()
+                        .unwrap_or_else(|_| panic!("Invalid key: {}", __key)),
                     __obj!($val)
                 );
             )*
@@ -277,6 +333,14 @@ macro_rules! obj {
     };
     (false $(,)?) => {
         __obj!(false)
+    };
+
+    // Escape hatch / negative-literal sugar, same as __obj!.
+    (($e:expr) $(,)?) => {
+        __obj!(($e))
+    };
+    (- $lit:literal $(,)?) => {
+        __obj!(-$lit)
     };
 
     // Number | String
@@ -322,15 +386,16 @@ fn n() {
     let _ = obj!(true);
     let _ = obj!(42.0);
     let _ = obj!("hello");
+    let _ = obj!(-1.0);
     let _ = list![];
     let mymap = map! {
-        null= 3,
-        null.{
-            n:2,
-            n:1
-        }
+        a: 3,
+        "$dollar": 1,           // quoted key -> literal "$dollar", no escaping needed
+        my.value: 2,            // dotted key -> flat "my.value" key
+        nested: { n: 2, m: 1 }, // {} nested directly as a value
+        neg: (-4.5),            // (expr) escape hatch for non-literal values
         b: null,
     };
     let _ = obj!(4.20);
-    let _ = list![1, 2, [3, 3], { a: 3 }];
+    let _ = list![1, 2, [3, 3], { a: 3 }, (-2.5)];
 }
