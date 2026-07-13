@@ -379,7 +379,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "dcon-core"
+name = "dcon"
 version = "0.1.0"
 dependencies = [
  "derive_more",
@@ -451,6 +451,7 @@ dependencies = [
  "bitflags",
  "boa_engine",
  "csv",
+ "dcon",
  "derive_more",
  "html-escape",
  "indoc",
@@ -465,10 +466,6 @@ dependencies = [
  "typeof-literal",
  "video-url-validator",
 ]
-
-[[package]]
-name = "draft-editor"
-version = "0.1.0"
 
 [[package]]
 name = "draft-lsp"

@@ -1,5 +1,6 @@
 use std::sync::LazyLock;
 
+use dcon::{Object, prelude::TapeExt};
 use linkify::{LinkFinder, LinkKind};
 use simdutf8::basic::{self, Utf8Error};
 use taped::{CharExt as TapedCharExt, SliceExt as TapedSliceExt, Tape};
@@ -11,8 +12,6 @@ use crate::{
         config::{DynConf, StaticConf},
         lex::{CheckboxType, InlineFormat, ListItemKind, Numbering, Token, TokenSpan},
     },
-    object::Object,
-    prelude::*,
 };
 
 static LINK_FINDER: LazyLock<LinkFinder> = LazyLock::new(|| {
@@ -45,20 +44,16 @@ pub struct MarkupSyntax<'a> {
     pub static_conf: &'a StaticConf,
 }
 
-impl<'a> Compile for MarkupSyntax<'a> {
-    type Output = Result<Vec<TokenSpan<'a>>, LexerError>;
-
-    fn compile(self) -> Self::Output {
-        if !self.static_conf.trusted_mode {
-            let this = &self;
-            basic::from_utf8(this.input)?;
-        }
-        let tokens = self.parse_virtual_tokens();
-        let mut tokens = self.parse_text_tokens(tokens);
-        self.convert_bad_tokens(&mut tokens);
-        tokens.pop(); // remove `Eof`
-        Ok(tokens)
+pub fn tokenize<'a>(src: MarkupSyntax<'a>) -> Result<Vec<TokenSpan<'a>>, LexerError> {
+    if !src.static_conf.trusted_mode {
+        let this = &src;
+        basic::from_utf8(this.input)?;
     }
+    let tokens = src.parse_virtual_tokens();
+    let mut tokens = src.parse_text_tokens(tokens);
+    src.convert_bad_tokens(&mut tokens);
+    tokens.pop(); // remove `Eof`
+    Ok(tokens)
 }
 
 impl<'a> MarkupSyntax<'a> {
@@ -130,8 +125,8 @@ impl<'a> MarkupSyntax<'a> {
                     } else {
                         tape.pos += 2;
                         Some(tape)
-                    }     
-                },
+                    }
+                }
                 b'#' => {
                     // line comment
                     tape.seek_ch(b'\n');
@@ -737,7 +732,7 @@ impl<'a> Scanner<'a> {
         if tape.pos == tape.len() - 1 {
             return None;
         }
-        tape.pos += 2;  // skip over `\` and character
+        tape.pos += 2; // skip over `\` and character
         return Some(tape);
     }
 
